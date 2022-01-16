@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ServiceUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.util</a> &gt; <span class="el_source">ServiceUtils.java</span></div><h1>ServiceUtils.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.zookeeper.util;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.util.Objects;
+import java.util.function.Consumer;
+import org.apache.zookeeper.server.ExitCode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Utilities for service management.
+ */
+public abstract class ServiceUtils {
+
+<span class="nc" id="L32">    private static final Logger LOG = LoggerFactory.getLogger(ServiceUtils.class);</span>
+
+    private ServiceUtils() {
+    }
+
+    /**
+     * Default strategy for shutting down the JVM.
+     */
+    @SuppressFBWarnings(&quot;DM_EXIT&quot;)
+<span class="nc" id="L41">    public static final Consumer&lt;Integer&gt; SYSTEM_EXIT = (code) -&gt; {</span>
+<span class="nc" id="L42">        LOG.error(&quot;Exiting JVM with code {}&quot;, code);</span>
+<span class="nc" id="L43">        System.exit(code);</span>
+<span class="nc" id="L44">    };</span>
+
+    /**
+     * No-op strategy, useful for tests.
+     */
+<span class="nc" id="L49">    public static final Consumer&lt;Integer&gt; LOG_ONLY = (code) -&gt; {</span>
+<span class="nc" id="L50">        LOG.error(&quot;Fatal error, JVM should exit with code {}. &quot;</span>
+                + &quot;Actually System.exit is disabled&quot;, code);
+<span class="nc" id="L52">    };</span>
+
+<span class="nc" id="L54">    private static volatile Consumer&lt;Integer&gt; systemExitProcedure = SYSTEM_EXIT;</span>
+
+    /**
+     * Override system callback. Useful for preventing the JVM to exit in tests
+     * or in applications that are running an in-process ZooKeeper server.
+     *
+     * @param systemExitProcedure
+     */
+    public static void setSystemExitProcedure(Consumer&lt;Integer&gt; systemExitProcedure) {
+<span class="nc" id="L63">        Objects.requireNonNull(systemExitProcedure);</span>
+<span class="nc" id="L64">        ServiceUtils.systemExitProcedure = systemExitProcedure;</span>
+<span class="nc" id="L65">    }</span>
+
+    /**
+     * Force shutdown of the JVM using System.exit.
+     *
+     * @param code the exit code
+     * @see ExitCode
+     */
+    public static void requestSystemExit(int code) {
+<span class="nc" id="L74">        systemExitProcedure.accept(code);</span>
+<span class="nc" id="L75">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

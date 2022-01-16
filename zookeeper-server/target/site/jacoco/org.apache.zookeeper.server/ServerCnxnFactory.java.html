@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ServerCnxnFactory.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">ServerCnxnFactory.java</span></div><h1>ServerCnxnFactory.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.management.JMException;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.Configuration;
+import javax.security.auth.login.LoginException;
+import org.apache.zookeeper.Environment;
+import org.apache.zookeeper.Login;
+import org.apache.zookeeper.common.ZKConfig;
+import org.apache.zookeeper.jmx.MBeanRegistry;
+import org.apache.zookeeper.server.auth.SaslServerCallbackHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+<span class="nc" id="L40">public abstract class ServerCnxnFactory {</span>
+
+    public static final String ZOOKEEPER_SERVER_CNXN_FACTORY = &quot;zookeeper.serverCnxnFactory&quot;;
+    private static final String ZOOKEEPER_MAX_CONNECTION = &quot;zookeeper.maxCnxns&quot;;
+    public static final int ZOOKEEPER_MAX_CONNECTION_DEFAULT = 0;
+
+<span class="nc" id="L46">    private static final Logger LOG = LoggerFactory.getLogger(ServerCnxnFactory.class);</span>
+
+    // Tells whether SSL is enabled on this ServerCnxnFactory
+    protected boolean secure;
+
+    /**
+     * The buffer will cause the connection to be close when we do a send.
+     */
+<span class="nc" id="L54">    static final ByteBuffer closeConn = ByteBuffer.allocate(0);</span>
+
+    // total number of connections accepted by the ZooKeeper server
+    protected int maxCnxns;
+
+    // sessionMap is used by closeSession()
+<span class="nc" id="L60">    final ConcurrentHashMap&lt;Long, ServerCnxn&gt; sessionMap = new ConcurrentHashMap&lt;Long, ServerCnxn&gt;();</span>
+
+<span class="nc" id="L62">    private static String loginUser = Login.SYSTEM_USER;</span>
+
+    public void addSession(long sessionId, ServerCnxn cnxn) {
+<span class="nc" id="L65">        sessionMap.put(sessionId, cnxn);</span>
+<span class="nc" id="L66">    }</span>
+
+    public void removeCnxnFromSessionMap(ServerCnxn cnxn) {
+<span class="nc" id="L69">        long sessionId = cnxn.getSessionId();</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">        if (sessionId != 0) {</span>
+<span class="nc" id="L71">            sessionMap.remove(sessionId);</span>
+        }
+<span class="nc" id="L73">    }</span>
+
+    /**
+     * @return true if the cnxn that contains the sessionId exists in this ServerCnxnFactory
+     *         and it's closed. Otherwise false.
+     */
+    public boolean closeSession(long sessionId, ServerCnxn.DisconnectReason reason) {
+<span class="nc" id="L80">        ServerCnxn cnxn = sessionMap.remove(sessionId);</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">        if (cnxn != null) {</span>
+            try {
+<span class="nc" id="L83">                cnxn.close(reason);</span>
+<span class="nc" id="L84">            } catch (Exception e) {</span>
+<span class="nc" id="L85">                LOG.warn(&quot;exception during session close&quot;, e);</span>
+<span class="nc" id="L86">            }</span>
+<span class="nc" id="L87">            return true;</span>
+        }
+<span class="nc" id="L89">        return false;</span>
+    }
+
+    public abstract int getLocalPort();
+
+    public abstract Iterable&lt;ServerCnxn&gt; getConnections();
+
+    public int getNumAliveConnections() {
+<span class="nc" id="L97">        return cnxns.size();</span>
+    }
+
+    public final ZooKeeperServer getZooKeeperServer() {
+<span class="nc" id="L101">        return zkServer;</span>
+    }
+
+    public void configure(InetSocketAddress addr, int maxcc) throws IOException {
+<span class="nc" id="L105">        configure(addr, maxcc, -1);</span>
+<span class="nc" id="L106">    }</span>
+
+    public void configure(InetSocketAddress addr, int maxcc, int backlog) throws IOException {
+<span class="nc" id="L109">        configure(addr, maxcc, backlog, false);</span>
+<span class="nc" id="L110">    }</span>
+
+    public abstract void configure(InetSocketAddress addr, int maxcc, int backlog, boolean secure) throws IOException;
+
+    public abstract void reconfigure(InetSocketAddress addr);
+
+    protected SaslServerCallbackHandler saslServerCallbackHandler;
+    public Login login;
+
+    /** Maximum number of connections allowed from particular host (ip) */
+    public abstract int getMaxClientCnxnsPerHost();
+
+    /** Maximum number of connections allowed from particular host (ip) */
+    public abstract void setMaxClientCnxnsPerHost(int max);
+
+    public boolean isSecure() {
+<span class="nc" id="L126">        return secure;</span>
+    }
+
+    public void startup(ZooKeeperServer zkServer) throws IOException, InterruptedException {
+<span class="nc" id="L130">        startup(zkServer, true);</span>
+<span class="nc" id="L131">    }</span>
+
+    // This method is to maintain compatiblity of startup(zks) and enable sharing of zks
+    // when we add secureCnxnFactory.
+    public abstract void startup(ZooKeeperServer zkServer, boolean startServer) throws IOException, InterruptedException;
+
+    /** The maximum queue length of the ZooKeeper server's socket */
+    public abstract int getSocketListenBacklog();
+
+    public abstract void join() throws InterruptedException;
+
+    public abstract void shutdown();
+
+    public abstract void start();
+
+    protected ZooKeeperServer zkServer;
+    public final void setZooKeeperServer(ZooKeeperServer zks) {
+<span class="nc" id="L148">        this.zkServer = zks;</span>
+<span class="nc bnc" id="L149" title="All 2 branches missed.">        if (zks != null) {</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">            if (secure) {</span>
+<span class="nc" id="L151">                zks.setSecureServerCnxnFactory(this);</span>
+            } else {
+<span class="nc" id="L153">                zks.setServerCnxnFactory(this);</span>
+            }
+        }
+<span class="nc" id="L156">    }</span>
+
+    public abstract void closeAll(ServerCnxn.DisconnectReason reason);
+
+    public static ServerCnxnFactory createFactory() throws IOException {
+<span class="nc" id="L161">        String serverCnxnFactoryName = System.getProperty(ZOOKEEPER_SERVER_CNXN_FACTORY);</span>
+<span class="nc bnc" id="L162" title="All 2 branches missed.">        if (serverCnxnFactoryName == null) {</span>
+<span class="nc" id="L163">            serverCnxnFactoryName = NIOServerCnxnFactory.class.getName();</span>
+        }
+        try {
+<span class="nc" id="L166">            ServerCnxnFactory serverCnxnFactory = (ServerCnxnFactory) Class.forName(serverCnxnFactoryName)</span>
+<span class="nc" id="L167">                                                                           .getDeclaredConstructor()</span>
+<span class="nc" id="L168">                                                                           .newInstance();</span>
+<span class="nc" id="L169">            LOG.info(&quot;Using {} as server connection factory&quot;, serverCnxnFactoryName);</span>
+<span class="nc" id="L170">            return serverCnxnFactory;</span>
+<span class="nc" id="L171">        } catch (Exception e) {</span>
+<span class="nc" id="L172">            IOException ioe = new IOException(&quot;Couldn't instantiate &quot; + serverCnxnFactoryName, e);</span>
+<span class="nc" id="L173">            throw ioe;</span>
+        }
+    }
+
+    public static ServerCnxnFactory createFactory(int clientPort, int maxClientCnxns) throws IOException {
+<span class="nc" id="L178">        return createFactory(new InetSocketAddress(clientPort), maxClientCnxns, -1);</span>
+    }
+
+    public static ServerCnxnFactory createFactory(int clientPort, int maxClientCnxns, int backlog) throws IOException {
+<span class="nc" id="L182">        return createFactory(new InetSocketAddress(clientPort), maxClientCnxns, backlog);</span>
+    }
+
+    public static ServerCnxnFactory createFactory(InetSocketAddress addr, int maxClientCnxns) throws IOException {
+<span class="nc" id="L186">        return createFactory(addr, maxClientCnxns, -1);</span>
+    }
+
+    public static ServerCnxnFactory createFactory(InetSocketAddress addr, int maxClientCnxns, int backlog) throws IOException {
+<span class="nc" id="L190">        ServerCnxnFactory factory = createFactory();</span>
+<span class="nc" id="L191">        factory.configure(addr, maxClientCnxns, backlog);</span>
+<span class="nc" id="L192">        return factory;</span>
+    }
+
+    public abstract InetSocketAddress getLocalAddress();
+
+    public abstract void resetAllConnectionStats();
+
+    public abstract Iterable&lt;Map&lt;String, Object&gt;&gt; getAllConnectionInfo(boolean brief);
+
+<span class="nc" id="L201">    private final ConcurrentHashMap&lt;ServerCnxn, ConnectionBean&gt; connectionBeans = new ConcurrentHashMap&lt;ServerCnxn, ConnectionBean&gt;();</span>
+
+    // Connection set is relied on heavily by four letter commands
+    // Construct a ConcurrentHashSet using a ConcurrentHashMap
+<span class="nc" id="L205">    protected final Set&lt;ServerCnxn&gt; cnxns = Collections.newSetFromMap(new ConcurrentHashMap&lt;ServerCnxn, Boolean&gt;());</span>
+    public void unregisterConnection(ServerCnxn serverCnxn) {
+<span class="nc" id="L207">        ConnectionBean jmxConnectionBean = connectionBeans.remove(serverCnxn);</span>
+<span class="nc bnc" id="L208" title="All 2 branches missed.">        if (jmxConnectionBean != null) {</span>
+<span class="nc" id="L209">            MBeanRegistry.getInstance().unregister(jmxConnectionBean);</span>
+        }
+<span class="nc" id="L211">    }</span>
+
+    public void registerConnection(ServerCnxn serverCnxn) {
+<span class="nc bnc" id="L214" title="All 2 branches missed.">        if (zkServer != null) {</span>
+<span class="nc" id="L215">            ConnectionBean jmxConnectionBean = new ConnectionBean(serverCnxn, zkServer);</span>
+            try {
+<span class="nc" id="L217">                MBeanRegistry.getInstance().register(jmxConnectionBean, zkServer.jmxServerBean);</span>
+<span class="nc" id="L218">                connectionBeans.put(serverCnxn, jmxConnectionBean);</span>
+<span class="nc" id="L219">            } catch (JMException e) {</span>
+<span class="nc" id="L220">                LOG.warn(&quot;Could not register connection&quot;, e);</span>
+<span class="nc" id="L221">            }</span>
+        }
+
+<span class="nc" id="L224">    }</span>
+
+    /**
+     * Initialize the server SASL if specified.
+     *
+     * If the user has specified a &quot;ZooKeeperServer.LOGIN_CONTEXT_NAME_KEY&quot;
+     * or a jaas.conf using &quot;java.security.auth.login.config&quot;
+     * the authentication is required and an exception is raised.
+     * Otherwise no authentication is configured and no exception is raised.
+     *
+     * @throws IOException if jaas.conf is missing or there's an error in it.
+     */
+    protected void configureSaslLogin() throws IOException {
+<span class="nc" id="L237">        String serverSection = System.getProperty(ZooKeeperSaslServer.LOGIN_CONTEXT_NAME_KEY, ZooKeeperSaslServer.DEFAULT_LOGIN_CONTEXT_NAME);</span>
+
+        // Note that 'Configuration' here refers to javax.security.auth.login.Configuration.
+<span class="nc" id="L240">        AppConfigurationEntry[] entries = null;</span>
+<span class="nc" id="L241">        SecurityException securityException = null;</span>
+        try {
+<span class="nc" id="L243">            entries = Configuration.getConfiguration().getAppConfigurationEntry(serverSection);</span>
+<span class="nc" id="L244">        } catch (SecurityException e) {</span>
+            // handle below: might be harmless if the user doesn't intend to use JAAS authentication.
+<span class="nc" id="L246">            securityException = e;</span>
+<span class="nc" id="L247">        }</span>
+
+        // No entries in jaas.conf
+        // If there's a configuration exception fetching the jaas section and
+        // the user has required sasl by specifying a LOGIN_CONTEXT_NAME_KEY or a jaas file
+        // we throw an exception otherwise we continue without authentication.
+<span class="nc bnc" id="L253" title="All 2 branches missed.">        if (entries == null) {</span>
+<span class="nc" id="L254">            String jaasFile = System.getProperty(Environment.JAAS_CONF_KEY);</span>
+<span class="nc" id="L255">            String loginContextName = System.getProperty(ZooKeeperSaslServer.LOGIN_CONTEXT_NAME_KEY);</span>
+<span class="nc bnc" id="L256" title="All 6 branches missed.">            if (securityException != null &amp;&amp; (loginContextName != null || jaasFile != null)) {</span>
+<span class="nc" id="L257">                String errorMessage = &quot;No JAAS configuration section named '&quot; + serverSection + &quot;' was found&quot;;</span>
+<span class="nc bnc" id="L258" title="All 2 branches missed.">                if (jaasFile != null) {</span>
+<span class="nc" id="L259">                    errorMessage += &quot; in '&quot; + jaasFile + &quot;'.&quot;;</span>
+                }
+<span class="nc bnc" id="L261" title="All 2 branches missed.">                if (loginContextName != null) {</span>
+<span class="nc" id="L262">                    errorMessage += &quot; But &quot; + ZooKeeperSaslServer.LOGIN_CONTEXT_NAME_KEY + &quot; was set.&quot;;</span>
+                }
+<span class="nc" id="L264">                LOG.error(errorMessage);</span>
+<span class="nc" id="L265">                throw new IOException(errorMessage);</span>
+            }
+<span class="nc" id="L267">            return;</span>
+        }
+
+        // jaas.conf entry available
+        try {
+<span class="nc" id="L272">            saslServerCallbackHandler = new SaslServerCallbackHandler(Configuration.getConfiguration());</span>
+<span class="nc" id="L273">            login = new Login(serverSection, saslServerCallbackHandler, new ZKConfig());</span>
+<span class="nc" id="L274">            setLoginUser(login.getUserName());</span>
+<span class="nc" id="L275">            login.startThreadIfNeeded();</span>
+<span class="nc" id="L276">        } catch (LoginException e) {</span>
+<span class="nc" id="L277">            throw new IOException(&quot;Could not configure server because SASL configuration did not allow the &quot;</span>
+                                  + &quot; ZooKeeper server to authenticate itself properly: &quot;
+                                  + e);
+<span class="nc" id="L280">        }</span>
+<span class="nc" id="L281">    }</span>
+
+    private static void setLoginUser(String name) {
+        //Created this method to avoid ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD find bug issue
+<span class="nc" id="L285">        loginUser = name;</span>
+<span class="nc" id="L286">    }</span>
+    /**
+     * User who has started the ZooKeeper server user, it will be the logged-in
+     * user. If no user logged-in then system user
+     */
+    public static String getUserName() {
+<span class="nc" id="L292">        return loginUser;</span>
+    }
+
+    /**
+     * Maximum number of connections allowed in the ZooKeeper system
+     */
+    public int getMaxCnxns() {
+<span class="nc" id="L299">        return maxCnxns;</span>
+    }
+
+    protected void initMaxCnxns() {
+<span class="nc" id="L303">        maxCnxns = Integer.getInteger(ZOOKEEPER_MAX_CONNECTION, ZOOKEEPER_MAX_CONNECTION_DEFAULT);</span>
+<span class="nc bnc" id="L304" title="All 2 branches missed.">        if (maxCnxns &lt; 0) {</span>
+<span class="nc" id="L305">            maxCnxns = ZOOKEEPER_MAX_CONNECTION_DEFAULT;</span>
+<span class="nc" id="L306">            LOG.warn(&quot;maxCnxns should be greater than or equal to 0, using default vlaue {}.&quot;,</span>
+<span class="nc" id="L307">                    ZOOKEEPER_MAX_CONNECTION_DEFAULT);</span>
+<span class="nc bnc" id="L308" title="All 2 branches missed.">        } else if (maxCnxns == ZOOKEEPER_MAX_CONNECTION_DEFAULT) {</span>
+<span class="nc" id="L309">            LOG.warn(&quot;maxCnxns is not configured, using default value {}.&quot;,</span>
+<span class="nc" id="L310">                    ZOOKEEPER_MAX_CONNECTION_DEFAULT);</span>
+        } else {
+<span class="nc" id="L312">            LOG.info(&quot;maxCnxns configured value is {}.&quot;, maxCnxns);</span>
+        }
+<span class="nc" id="L314">    }</span>
+
+    /**
+     * Ensure total number of connections are less than the maxCnxns
+     */
+    protected boolean limitTotalNumberOfCnxns() {
+<span class="nc bnc" id="L320" title="All 2 branches missed.">        if (maxCnxns &lt;= 0) {</span>
+            // maxCnxns limit is disabled
+<span class="nc" id="L322">            return false;</span>
+        }
+<span class="nc" id="L324">        int cnxns = getNumAliveConnections();</span>
+<span class="nc bnc" id="L325" title="All 2 branches missed.">        if (cnxns &gt;= maxCnxns) {</span>
+<span class="nc" id="L326">            LOG.error(&quot;Too many connections &quot; + cnxns + &quot; - max is &quot; + maxCnxns);</span>
+<span class="nc" id="L327">            return true;</span>
+        }
+<span class="nc" id="L329">        return false;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CliWrapperException.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.cli</a> &gt; <span class="el_source">CliWrapperException.java</span></div><h1>CliWrapperException.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.cli;
+
+import org.apache.zookeeper.KeeperException;
+
+@SuppressWarnings(&quot;serial&quot;)
+public class CliWrapperException extends CliException {
+
+    public CliWrapperException(Throwable cause) {
+<span class="nc" id="L27">        super(getMessage(cause), cause);</span>
+<span class="nc" id="L28">    }</span>
+
+    private static String getMessage(Throwable cause) {
+<span class="nc bnc" id="L31" title="All 2 branches missed.">        if (cause instanceof KeeperException) {</span>
+<span class="nc" id="L32">            KeeperException keeperException = (KeeperException) cause;</span>
+<span class="nc bnc" id="L33" title="All 2 branches missed.">            if (keeperException instanceof KeeperException.NoNodeException) {</span>
+<span class="nc" id="L34">                return &quot;Node does not exist: &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L35" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.NoChildrenForEphemeralsException) {</span>
+<span class="nc" id="L36">                return &quot;Ephemerals cannot have children: &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L37" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.NodeExistsException) {</span>
+<span class="nc" id="L38">                return &quot;Node already exists: &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L39" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.NotEmptyException) {</span>
+<span class="nc" id="L40">                return &quot;Node not empty: &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L41" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.NotReadOnlyException) {</span>
+<span class="nc" id="L42">                return &quot;Not a read-only call: &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L43" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.InvalidACLException) {</span>
+<span class="nc" id="L44">                return &quot;Acl is not valid : &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L45" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.NoAuthException) {</span>
+<span class="nc" id="L46">                return &quot;Insufficient permission : &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L47" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.BadArgumentsException) {</span>
+<span class="nc" id="L48">                return &quot;Arguments are not valid : &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L49" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.BadVersionException) {</span>
+<span class="nc" id="L50">                return &quot;version No is not valid : &quot; + keeperException.getPath();</span>
+<span class="nc bnc" id="L51" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.ReconfigInProgress) {</span>
+<span class="nc" id="L52">                return &quot;Another reconfiguration is in progress -- concurrent &quot; + &quot;reconfigs not supported (yet)&quot;;</span>
+<span class="nc bnc" id="L53" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.NewConfigNoQuorum) {</span>
+<span class="nc" id="L54">                return &quot;No quorum of new config is connected and &quot;</span>
+                       + &quot;up-to-date with the leader of last commmitted config - try invoking reconfiguration after &quot;
+                       + &quot;new servers are connected and synced&quot;;
+<span class="nc bnc" id="L57" title="All 2 branches missed.">            } else if (keeperException instanceof KeeperException.QuotaExceededException) {</span>
+<span class="nc" id="L58">                return &quot;Quota has exceeded : &quot; + keeperException.getPath();</span>
+            }
+        }
+<span class="nc" id="L61">        return cause.getMessage();</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

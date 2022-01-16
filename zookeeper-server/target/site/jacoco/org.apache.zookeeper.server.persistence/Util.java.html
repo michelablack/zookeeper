@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Util.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.persistence</a> &gt; <span class="el_source">Util.java</span></div><h1>Util.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.persistence;
+
+import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
+import java.io.File;
+import java.io.IOException;
+import java.io.Serializable;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Properties;
+import org.apache.jute.BinaryOutputArchive;
+import org.apache.jute.InputArchive;
+import org.apache.jute.OutputArchive;
+import org.apache.jute.Record;
+import org.apache.zookeeper.txn.TxnDigest;
+import org.apache.zookeeper.txn.TxnHeader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * A collection of utility methods for dealing with file name parsing,
+ * low level I/O file operations and marshalling/unmarshalling.
+ */
+<span class="nc" id="L46">public class Util {</span>
+
+<span class="fc" id="L48">    private static final Logger LOG = LoggerFactory.getLogger(Util.class);</span>
+    private static final String SNAP_DIR = &quot;snapDir&quot;;
+    private static final String LOG_DIR = &quot;logDir&quot;;
+    private static final String DB_FORMAT_CONV = &quot;dbFormatConversion&quot;;
+
+    public static String makeURIString(String dataDir, String dataLogDir, String convPolicy) {
+<span class="nc" id="L54">        String uri = &quot;file:&quot; + SNAP_DIR + &quot;=&quot; + dataDir + &quot;;&quot; + LOG_DIR + &quot;=&quot; + dataLogDir;</span>
+<span class="nc bnc" id="L55" title="All 2 branches missed.">        if (convPolicy != null) {</span>
+<span class="nc" id="L56">            uri += &quot;;&quot; + DB_FORMAT_CONV + &quot;=&quot; + convPolicy;</span>
+        }
+<span class="nc" id="L58">        return uri.replace('\\', '/');</span>
+    }
+    /**
+     * Given two directory files the method returns a well-formed
+     * logfile provider URI. This method is for backward compatibility with the
+     * existing code that only supports logfile persistence and expects these two
+     * parameters passed either on the command-line or in the configuration file.
+     *
+     * @param dataDir snapshot directory
+     * @param dataLogDir transaction log directory
+     * @return logfile provider URI
+     */
+    public static URI makeFileLoggerURL(File dataDir, File dataLogDir) {
+<span class="nc" id="L71">        return URI.create(makeURIString(dataDir.getPath(), dataLogDir.getPath(), null));</span>
+    }
+
+    public static URI makeFileLoggerURL(File dataDir, File dataLogDir, String convPolicy) {
+<span class="nc" id="L75">        return URI.create(makeURIString(dataDir.getPath(), dataLogDir.getPath(), convPolicy));</span>
+    }
+
+    /**
+     * Creates a valid transaction log file name.
+     *
+     * @param zxid used as a file name suffix (extension)
+     * @return file name
+     */
+    public static String makeLogName(long zxid) {
+<span class="fc" id="L85">        return FileTxnLog.LOG_FILE_PREFIX + &quot;.&quot; + Long.toHexString(zxid);</span>
+    }
+
+    /**
+     * Creates a snapshot file name.
+     *
+     * @param zxid used as a suffix
+     * @return file name
+     */
+    public static String makeSnapshotName(long zxid) {
+<span class="nc" id="L95">        return FileSnap.SNAPSHOT_FILE_PREFIX + &quot;.&quot;</span>
+<span class="nc" id="L96">               + Long.toHexString(zxid)</span>
+<span class="nc" id="L97">               + SnapStream.getStreamMode().getFileExtension();</span>
+    }
+
+    /**
+     * Extracts snapshot directory property value from the container.
+     *
+     * @param props properties container
+     * @return file representing the snapshot directory
+     */
+    public static File getSnapDir(Properties props) {
+<span class="nc" id="L107">        return new File(props.getProperty(SNAP_DIR));</span>
+    }
+
+    /**
+     * Extracts transaction log directory property value from the container.
+     *
+     * @param props properties container
+     * @return file representing the txn log directory
+     */
+    public static File getLogDir(Properties props) {
+<span class="nc" id="L117">        return new File(props.getProperty(LOG_DIR));</span>
+    }
+
+    /**
+     * Extracts the value of the dbFormatConversion attribute.
+     *
+     * @param props properties container
+     * @return value of the dbFormatConversion attribute
+     */
+    public static String getFormatConversionPolicy(Properties props) {
+<span class="nc" id="L127">        return props.getProperty(DB_FORMAT_CONV);</span>
+    }
+
+    /**
+     * Extracts zxid from the file name. The file name should have been created
+     * using one of the {@link #makeLogName(long)} or {@link #makeSnapshotName(long)}.
+     *
+     * @param name the file name to parse
+     * @param prefix the file name prefix (snapshot or log)
+     * @return zxid
+     */
+    public static long getZxidFromName(String name, String prefix) {
+<span class="fc" id="L139">        long zxid = -1;</span>
+<span class="fc" id="L140">        String[] nameParts = name.split(&quot;\\.&quot;);</span>
+<span class="pc bpc" id="L141" title="2 of 4 branches missed.">        if (nameParts.length &gt;= 2 &amp;&amp; nameParts[0].equals(prefix)) {</span>
+            try {
+<span class="fc" id="L143">                zxid = Long.parseLong(nameParts[1], 16);</span>
+<span class="nc" id="L144">            } catch (NumberFormatException e) {</span>
+<span class="fc" id="L145">            }</span>
+        }
+<span class="fc" id="L147">        return zxid;</span>
+    }
+
+    /**
+     * Reads a transaction entry from the input archive.
+     * @param ia archive to read from
+     * @return null if the entry is corrupted or EOF has been reached; a buffer
+     * (possible empty) containing serialized transaction record.
+     * @throws IOException
+     */
+    public static byte[] readTxnBytes(InputArchive ia) throws IOException {
+        try {
+<span class="fc" id="L159">            byte[] bytes = ia.readBuffer(&quot;txtEntry&quot;);</span>
+            // Since we preallocate, we define EOF to be an
+            // empty transaction
+<span class="fc bfc" id="L162" title="All 2 branches covered.">            if (bytes.length == 0) {</span>
+<span class="fc" id="L163">                return bytes;</span>
+            }
+<span class="pc bpc" id="L165" title="1 of 2 branches missed.">            if (ia.readByte(&quot;EOF&quot;) != 'B') {</span>
+<span class="nc" id="L166">                LOG.error(&quot;Last transaction was partial.&quot;);</span>
+<span class="nc" id="L167">                return null;</span>
+            }
+<span class="fc" id="L169">            return bytes;</span>
+<span class="nc" id="L170">        } catch (EOFException e) {</span>
+        }
+<span class="nc" id="L172">        return null;</span>
+    }
+
+    /**
+     * Serializes transaction header and transaction data into a byte buffer.
+     *
+     * @param hdr transaction header
+     * @param txn transaction data
+     * @return serialized transaction record
+     * @throws IOException
+     */
+    public static byte[] marshallTxnEntry(TxnHeader hdr, Record txn) throws IOException {
+<span class="nc" id="L184">        return marshallTxnEntry(hdr, txn, null);</span>
+    }
+
+    public static byte[] marshallTxnEntry(TxnHeader hdr, Record txn, TxnDigest digest)
+            throws IOException {
+<span class="fc" id="L189">        ByteArrayOutputStream baos = new ByteArrayOutputStream();</span>
+<span class="fc" id="L190">        OutputArchive boa = BinaryOutputArchive.getArchive(baos);</span>
+
+<span class="fc" id="L192">        hdr.serialize(boa, &quot;hdr&quot;);</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">        if (txn != null) {</span>
+<span class="fc" id="L194">            txn.serialize(boa, &quot;txn&quot;);</span>
+        }
+<span class="fc bfc" id="L196" title="All 2 branches covered.">        if (digest != null) {</span>
+<span class="fc" id="L197">            digest.serialize(boa, &quot;digest&quot;);</span>
+        }
+<span class="fc" id="L199">        return baos.toByteArray();</span>
+    }
+
+    /**
+     * Write the serialized transaction record to the output archive.
+     *
+     * @param oa output archive
+     * @param bytes serialized transaction record
+     * @throws IOException
+     */
+    public static void writeTxnBytes(OutputArchive oa, byte[] bytes) throws IOException {
+<span class="fc" id="L210">        oa.writeBuffer(bytes, &quot;txnEntry&quot;);</span>
+<span class="fc" id="L211">        oa.writeByte((byte) 0x42, &quot;EOR&quot;); // 'B'</span>
+<span class="fc" id="L212">    }</span>
+
+    /**
+     * Compare file file names of form &quot;prefix.version&quot;. Sort order result
+     * returned in order of version.
+     */
+    private static class DataDirFileComparator implements Comparator&lt;File&gt;, Serializable {
+
+        private static final long serialVersionUID = -2648639884525140318L;
+
+        private String prefix;
+        private boolean ascending;
+<span class="fc" id="L224">        public DataDirFileComparator(String prefix, boolean ascending) {</span>
+<span class="fc" id="L225">            this.prefix = prefix;</span>
+<span class="fc" id="L226">            this.ascending = ascending;</span>
+<span class="fc" id="L227">        }</span>
+
+        public int compare(File o1, File o2) {
+<span class="fc" id="L230">            long z1 = Util.getZxidFromName(o1.getName(), prefix);</span>
+<span class="fc" id="L231">            long z2 = Util.getZxidFromName(o2.getName(), prefix);</span>
+<span class="pc bpc" id="L232" title="1 of 4 branches missed.">            int result = z1 &lt; z2 ? -1 : (z1 &gt; z2 ? 1 : 0);</span>
+<span class="fc bfc" id="L233" title="All 2 branches covered.">            return ascending ? result : -result;</span>
+        }
+
+    }
+
+    /**
+     * Sort the list of files. Recency as determined by the version component
+     * of the file name.
+     *
+     * @param files array of files
+     * @param prefix files not matching this prefix are assumed to have a
+     * version = -1)
+     * @param ascending true sorted in ascending order, false results in
+     * descending order
+     * @return sorted input files
+     */
+    public static List&lt;File&gt; sortDataDir(File[] files, String prefix, boolean ascending) {
+<span class="pc bpc" id="L250" title="1 of 2 branches missed.">        if (files == null) {</span>
+<span class="nc" id="L251">            return new ArrayList&lt;File&gt;(0);</span>
+        }
+<span class="fc" id="L253">        List&lt;File&gt; filelist = Arrays.asList(files);</span>
+<span class="fc" id="L254">        Collections.sort(filelist, new DataDirFileComparator(prefix, ascending));</span>
+<span class="fc" id="L255">        return filelist;</span>
+    }
+
+    /**
+     * Returns true if fileName is a log file name.
+     *
+     * @param fileName
+     */
+    public static boolean isLogFileName(String fileName) {
+<span class="nc" id="L264">        return fileName.startsWith(FileTxnLog.LOG_FILE_PREFIX + &quot;.&quot;);</span>
+    }
+
+    /**
+     * Returns true if fileName is a snapshot file name.
+     *
+     * @param fileName
+     */
+    public static boolean isSnapshotFileName(String fileName) {
+<span class="nc" id="L273">        return fileName.startsWith(FileSnap.SNAPSHOT_FILE_PREFIX + &quot;.&quot;);</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AvgMinMaxPercentileCounter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.metric</a> &gt; <span class="el_source">AvgMinMaxPercentileCounter.java</span></div><h1>AvgMinMaxPercentileCounter.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.metric;
+
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Reservoir;
+import com.codahale.metrics.Snapshot;
+import com.codahale.metrics.UniformSnapshot;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
+import org.apache.zookeeper.metrics.Summary;
+
+/**
+ * Generic long counter that keep track of min/max/avg/percentiles.
+ * The counter is thread-safe
+ */
+public class AvgMinMaxPercentileCounter extends Metric implements Summary {
+
+    private final String name;
+    private final AvgMinMaxCounter counter;
+    private final ResettableUniformReservoir reservoir;
+    private final Histogram histogram;
+
+<span class="fc" id="L45">    static class ResettableUniformReservoir implements Reservoir {</span>
+
+        private static final int DEFAULT_SIZE = 4096;
+        private static final int BITS_PER_LONG = 63;
+
+<span class="fc" id="L50">        private final AtomicLong count = new AtomicLong();</span>
+<span class="fc" id="L51">        private volatile AtomicLongArray values = new AtomicLongArray(DEFAULT_SIZE);</span>
+
+        @Override
+        public int size() {
+<span class="nc" id="L55">            final long c = count.get();</span>
+<span class="nc bnc" id="L56" title="All 2 branches missed.">            if (c &gt; values.length()) {</span>
+<span class="nc" id="L57">                return values.length();</span>
+            }
+<span class="nc" id="L59">            return (int) c;</span>
+        }
+
+        @Override
+        public void update(long value) {
+<span class="nc" id="L64">            final long c = count.incrementAndGet();</span>
+<span class="nc bnc" id="L65" title="All 2 branches missed.">            if (c &lt;= values.length()) {</span>
+<span class="nc" id="L66">                values.set((int) c - 1, value);</span>
+            } else {
+<span class="nc" id="L68">                final long r = nextLong(c);</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">                if (r &lt; values.length()) {</span>
+<span class="nc" id="L70">                    values.set((int) r, value);</span>
+                }
+            }
+<span class="nc" id="L73">        }</span>
+
+        private static long nextLong(long n) {
+            long bits, val;
+            do {
+<span class="nc" id="L78">                bits = ThreadLocalRandom.current().nextLong() &amp; (~(1L &lt;&lt; BITS_PER_LONG));</span>
+<span class="nc" id="L79">                val = bits % n;</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">            } while (bits - val + (n - 1) &lt; 0L);</span>
+<span class="nc" id="L81">            return val;</span>
+        }
+
+        @Override
+        public Snapshot getSnapshot() {
+<span class="nc" id="L86">            final int s = size();</span>
+<span class="nc" id="L87">            final List&lt;Long&gt; copy = new ArrayList&lt;Long&gt;(s);</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">            for (int i = 0; i &lt; s; i++) {</span>
+<span class="nc" id="L89">                copy.add(values.get(i));</span>
+            }
+<span class="nc" id="L91">            return new UniformSnapshot(copy);</span>
+        }
+
+        public void reset() {
+<span class="nc" id="L95">            count.set(0);</span>
+<span class="nc" id="L96">            values = new AtomicLongArray(DEFAULT_SIZE);</span>
+<span class="nc" id="L97">        }</span>
+
+    }
+
+<span class="fc" id="L101">    public AvgMinMaxPercentileCounter(String name) {</span>
+
+<span class="fc" id="L103">        this.name = name;</span>
+<span class="fc" id="L104">        this.counter = new AvgMinMaxCounter(this.name);</span>
+<span class="fc" id="L105">        reservoir = new ResettableUniformReservoir();</span>
+<span class="fc" id="L106">        histogram = new Histogram(reservoir);</span>
+<span class="fc" id="L107">    }</span>
+
+    public void addDataPoint(long value) {
+<span class="nc" id="L110">        counter.add(value);</span>
+<span class="nc" id="L111">        histogram.update(value);</span>
+<span class="nc" id="L112">    }</span>
+
+    public void resetMax() {
+        // To match existing behavior in upstream
+<span class="nc" id="L116">        counter.resetMax();</span>
+<span class="nc" id="L117">    }</span>
+
+    public void reset() {
+<span class="nc" id="L120">        counter.reset();</span>
+<span class="nc" id="L121">        reservoir.reset();</span>
+<span class="nc" id="L122">    }</span>
+
+    public void add(long value) {
+<span class="nc" id="L125">        addDataPoint(value);</span>
+<span class="nc" id="L126">    }</span>
+
+    public Map&lt;String, Object&gt; values() {
+<span class="nc" id="L129">        Map&lt;String, Object&gt; m = new LinkedHashMap&lt;&gt;();</span>
+<span class="nc" id="L130">        m.putAll(counter.values());</span>
+<span class="nc" id="L131">        m.put(&quot;p50_&quot; + name, Math.round(this.histogram.getSnapshot().getMedian()));</span>
+<span class="nc" id="L132">        m.put(&quot;p95_&quot; + name, Math.round(this.histogram.getSnapshot().get95thPercentile()));</span>
+<span class="nc" id="L133">        m.put(&quot;p99_&quot; + name, Math.round(this.histogram.getSnapshot().get99thPercentile()));</span>
+<span class="nc" id="L134">        m.put(&quot;p999_&quot; + name, Math.round(this.histogram.getSnapshot().get999thPercentile()));</span>
+<span class="nc" id="L135">        return m;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

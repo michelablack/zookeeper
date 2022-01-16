@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SnapshotFormatter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">SnapshotFormatter.java</span></div><h1>SnapshotFormatter.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * &lt;p&gt;
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * &lt;p&gt;
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import static org.apache.zookeeper.server.persistence.FileSnap.SNAPSHOT_FILE_PREFIX;
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Base64;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import org.apache.jute.BinaryInputArchive;
+import org.apache.jute.InputArchive;
+import org.apache.yetus.audience.InterfaceAudience;
+import org.apache.zookeeper.ZKUtil;
+import org.apache.zookeeper.data.StatPersisted;
+import org.apache.zookeeper.server.persistence.FileSnap;
+import org.apache.zookeeper.server.persistence.SnapStream;
+import org.apache.zookeeper.server.persistence.Util;
+import org.apache.zookeeper.util.ServiceUtils;
+
+/**
+ * Dump a snapshot file to stdout.
+ *
+ * For JSON format, followed https://dev.yorhel.nl/ncdu/jsonfmt
+ */
+@InterfaceAudience.Public
+<span class="nc" id="L47">public class SnapshotFormatter {</span>
+
+    // per-znode counter so ncdu treats each as a unique object
+<span class="nc" id="L50">    private static Integer INODE_IDX = 1000;</span>
+
+    /**
+     * USAGE: SnapshotFormatter snapshot_file or the ready-made script: zkSnapShotToolkit.sh
+     */
+    public static void main(String[] args) throws Exception {
+<span class="nc" id="L56">        String snapshotFile = null;</span>
+<span class="nc" id="L57">        boolean dumpData = false;</span>
+<span class="nc" id="L58">        boolean dumpJson = false;</span>
+
+        int i;
+<span class="nc bnc" id="L61" title="All 2 branches missed.">        for (i = 0; i &lt; args.length; i++) {</span>
+<span class="nc bnc" id="L62" title="All 2 branches missed.">            if (args[i].equals(&quot;-d&quot;)) {</span>
+<span class="nc" id="L63">                dumpData = true;</span>
+<span class="nc bnc" id="L64" title="All 2 branches missed.">            } else if (args[i].equals(&quot;-json&quot;)) {</span>
+<span class="nc" id="L65">                dumpJson = true;</span>
+            } else {
+<span class="nc" id="L67">                snapshotFile = args[i];</span>
+<span class="nc" id="L68">                i++;</span>
+<span class="nc" id="L69">                break;</span>
+            }
+        }
+<span class="nc bnc" id="L72" title="All 4 branches missed.">        if (args.length != i || snapshotFile == null) {</span>
+<span class="nc" id="L73">            System.err.println(&quot;USAGE: SnapshotFormatter [-d|-json] snapshot_file&quot;);</span>
+<span class="nc" id="L74">            System.err.println(&quot;       -d dump the data for each znode&quot;);</span>
+<span class="nc" id="L75">            System.err.println(&quot;       -json dump znode info in json format&quot;);</span>
+<span class="nc" id="L76">            ServiceUtils.requestSystemExit(ExitCode.INVALID_INVOCATION.getValue());</span>
+<span class="nc" id="L77">            return;</span>
+        }
+
+<span class="nc" id="L80">        String error = ZKUtil.validateFileInput(snapshotFile);</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">        if (null != error) {</span>
+<span class="nc" id="L82">            System.err.println(error);</span>
+<span class="nc" id="L83">            ServiceUtils.requestSystemExit(ExitCode.INVALID_INVOCATION.getValue());</span>
+        }
+
+<span class="nc bnc" id="L86" title="All 4 branches missed.">        if (dumpData &amp;&amp; dumpJson) {</span>
+<span class="nc" id="L87">            System.err.println(&quot;Cannot specify both data dump (-d) and json mode (-json) in same call&quot;);</span>
+<span class="nc" id="L88">            ServiceUtils.requestSystemExit(ExitCode.INVALID_INVOCATION.getValue());</span>
+        }
+
+<span class="nc" id="L91">        new SnapshotFormatter().run(snapshotFile, dumpData, dumpJson);</span>
+<span class="nc" id="L92">    }</span>
+
+    public void run(String snapshotFileName, boolean dumpData, boolean dumpJson) throws IOException {
+<span class="nc" id="L95">        File snapshotFile = new File(snapshotFileName);</span>
+<span class="nc" id="L96">        try (InputStream is = SnapStream.getInputStream(snapshotFile)) {</span>
+<span class="nc" id="L97">            InputArchive ia = BinaryInputArchive.getArchive(is);</span>
+
+<span class="nc" id="L99">            FileSnap fileSnap = new FileSnap(null);</span>
+
+<span class="nc" id="L101">            DataTree dataTree = new DataTree();</span>
+<span class="nc" id="L102">            Map&lt;Long, Integer&gt; sessions = new HashMap&lt;Long, Integer&gt;();</span>
+
+<span class="nc" id="L104">            fileSnap.deserialize(dataTree, sessions, ia);</span>
+<span class="nc" id="L105">            long fileNameZxid = Util.getZxidFromName(snapshotFile.getName(), SNAPSHOT_FILE_PREFIX);</span>
+
+<span class="nc bnc" id="L107" title="All 2 branches missed.">            if (dumpJson) {</span>
+<span class="nc" id="L108">                printSnapshotJson(dataTree);</span>
+            } else {
+<span class="nc" id="L110">                printDetails(dataTree, sessions, dumpData, fileNameZxid);</span>
+            }
+        }
+<span class="nc" id="L113">    }</span>
+
+    private void printDetails(DataTree dataTree, Map&lt;Long, Integer&gt; sessions, boolean dumpData, long fileNameZxid) {
+<span class="nc" id="L116">        long dtZxid = printZnodeDetails(dataTree, dumpData);</span>
+<span class="nc" id="L117">        printSessionDetails(dataTree, sessions);</span>
+<span class="nc" id="L118">        DataTree.ZxidDigest targetZxidDigest = dataTree.getDigestFromLoadedSnapshot();</span>
+<span class="nc bnc" id="L119" title="All 2 branches missed.">        if (targetZxidDigest != null) {</span>
+<span class="nc" id="L120">            System.out.println(String.format(&quot;Target zxid digest is: %s, %s&quot;,</span>
+<span class="nc" id="L121">                    Long.toHexString(targetZxidDigest.zxid), targetZxidDigest.digest));</span>
+        }
+<span class="nc" id="L123">        System.out.println(String.format(&quot;----%nLast zxid: 0x%s&quot;, Long.toHexString(Math.max(fileNameZxid, dtZxid))));</span>
+<span class="nc" id="L124">    }</span>
+
+    private long printZnodeDetails(DataTree dataTree, boolean dumpData) {
+<span class="nc" id="L127">        System.out.println(String.format(&quot;ZNode Details (count=%d):&quot;, dataTree.getNodeCount()));</span>
+
+<span class="nc" id="L129">        final long zxid = printZnode(dataTree, &quot;/&quot;, dumpData);</span>
+<span class="nc" id="L130">        System.out.println(&quot;----&quot;);</span>
+<span class="nc" id="L131">        return zxid;</span>
+    }
+
+    private long printZnode(DataTree dataTree, String name, boolean dumpData) {
+<span class="nc" id="L135">        System.out.println(&quot;----&quot;);</span>
+<span class="nc" id="L136">        DataNode n = dataTree.getNode(name);</span>
+        Set&lt;String&gt; children;
+        long zxid;
+<span class="nc" id="L139">        synchronized (n) { // keep findbugs happy</span>
+<span class="nc" id="L140">            System.out.println(name);</span>
+<span class="nc" id="L141">            printStat(n.stat);</span>
+<span class="nc" id="L142">            zxid = Math.max(n.stat.getMzxid(), n.stat.getPzxid());</span>
+<span class="nc bnc" id="L143" title="All 2 branches missed.">            if (dumpData) {</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">                System.out.println(&quot;  data = &quot; + (n.data == null ? &quot;&quot; : Base64.getEncoder().encodeToString(n.data)));</span>
+            } else {
+<span class="nc bnc" id="L146" title="All 2 branches missed.">                System.out.println(&quot;  dataLength = &quot; + (n.data == null ? 0 : n.data.length));</span>
+            }
+<span class="nc" id="L148">            children = n.getChildren();</span>
+<span class="nc" id="L149">        }</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">        if (children != null) {</span>
+<span class="nc bnc" id="L151" title="All 2 branches missed.">            for (String child : children) {</span>
+<span class="nc bnc" id="L152" title="All 2 branches missed.">                long cxid = printZnode(dataTree, name + (name.equals(&quot;/&quot;) ? &quot;&quot; : &quot;/&quot;) + child, dumpData);</span>
+<span class="nc" id="L153">                zxid = Math.max(zxid, cxid);</span>
+<span class="nc" id="L154">            }</span>
+        }
+<span class="nc" id="L156">        return zxid;</span>
+    }
+
+    private void printSessionDetails(DataTree dataTree, Map&lt;Long, Integer&gt; sessions) {
+<span class="nc" id="L160">        System.out.println(&quot;Session Details (sid, timeout, ephemeralCount):&quot;);</span>
+<span class="nc bnc" id="L161" title="All 2 branches missed.">        for (Map.Entry&lt;Long, Integer&gt; e : sessions.entrySet()) {</span>
+<span class="nc" id="L162">            long sid = e.getKey();</span>
+<span class="nc" id="L163">            System.out.println(String.format(&quot;%#016x, %d, %d&quot;, sid, e.getValue(), dataTree.getEphemerals(sid).size()));</span>
+<span class="nc" id="L164">        }</span>
+<span class="nc" id="L165">    }</span>
+
+    private void printStat(StatPersisted stat) {
+<span class="nc" id="L168">        printHex(&quot;cZxid&quot;, stat.getCzxid());</span>
+<span class="nc" id="L169">        System.out.println(&quot;  ctime = &quot; + new Date(stat.getCtime()).toString());</span>
+<span class="nc" id="L170">        printHex(&quot;mZxid&quot;, stat.getMzxid());</span>
+<span class="nc" id="L171">        System.out.println(&quot;  mtime = &quot; + new Date(stat.getMtime()).toString());</span>
+<span class="nc" id="L172">        printHex(&quot;pZxid&quot;, stat.getPzxid());</span>
+<span class="nc" id="L173">        System.out.println(&quot;  cversion = &quot; + stat.getCversion());</span>
+<span class="nc" id="L174">        System.out.println(&quot;  dataVersion = &quot; + stat.getVersion());</span>
+<span class="nc" id="L175">        System.out.println(&quot;  aclVersion = &quot; + stat.getAversion());</span>
+<span class="nc" id="L176">        printHex(&quot;ephemeralOwner&quot;, stat.getEphemeralOwner());</span>
+<span class="nc" id="L177">    }</span>
+
+    private void printHex(String prefix, long value) {
+<span class="nc" id="L180">        System.out.println(String.format(&quot;  %s = %#016x&quot;, prefix, value));</span>
+<span class="nc" id="L181">    }</span>
+
+    private void printSnapshotJson(final DataTree dataTree) {
+<span class="nc" id="L184">        JsonStringEncoder encoder = JsonStringEncoder.getInstance();</span>
+<span class="nc" id="L185">        System.out.printf(</span>
+            &quot;[1,0,{\&quot;progname\&quot;:\&quot;SnapshotFormatter.java\&quot;,\&quot;progver\&quot;:\&quot;0.01\&quot;,\&quot;timestamp\&quot;:%d}&quot;,
+<span class="nc" id="L187">            System.currentTimeMillis());</span>
+<span class="nc" id="L188">        printZnodeJson(dataTree, &quot;/&quot;, encoder);</span>
+<span class="nc" id="L189">        System.out.print(&quot;]&quot;);</span>
+<span class="nc" id="L190">    }</span>
+
+    private void printZnodeJson(final DataTree dataTree, final String fullPath, JsonStringEncoder encoder) {
+
+
+<span class="nc" id="L195">        final DataNode n = dataTree.getNode(fullPath);</span>
+
+<span class="nc bnc" id="L197" title="All 2 branches missed.">        if (null == n) {</span>
+<span class="nc" id="L198">            System.err.println(&quot;DataTree Node for &quot; + fullPath + &quot; doesn't exist&quot;);</span>
+<span class="nc" id="L199">            return;</span>
+        }
+
+<span class="nc bnc" id="L202" title="All 2 branches missed.">        final String name = fullPath.equals(&quot;/&quot;)</span>
+<span class="nc" id="L203">            ? fullPath</span>
+<span class="nc" id="L204">            : fullPath.substring(fullPath.lastIndexOf(&quot;/&quot;) + 1);</span>
+
+<span class="nc" id="L206">        System.out.print(&quot;,&quot;);</span>
+
+        int dataLen;
+<span class="nc" id="L209">        synchronized (n) { // keep findbugs happy</span>
+<span class="nc bnc" id="L210" title="All 2 branches missed.">            dataLen = (n.data == null) ? 0 : n.data.length;</span>
+<span class="nc" id="L211">        }</span>
+<span class="nc" id="L212">        StringBuilder nodeSB = new StringBuilder();</span>
+<span class="nc" id="L213">        nodeSB.append(&quot;{&quot;);</span>
+<span class="nc" id="L214">        nodeSB.append(&quot;\&quot;name\&quot;:\&quot;&quot;).append(encoder.quoteAsString(name)).append(&quot;\&quot;&quot;).append(&quot;,&quot;);</span>
+<span class="nc" id="L215">        nodeSB.append(&quot;\&quot;asize\&quot;:&quot;).append(dataLen).append(&quot;,&quot;);</span>
+<span class="nc" id="L216">        nodeSB.append(&quot;\&quot;dsize\&quot;:&quot;).append(dataLen).append(&quot;,&quot;);</span>
+<span class="nc" id="L217">        nodeSB.append(&quot;\&quot;dev\&quot;:&quot;).append(0).append(&quot;,&quot;);</span>
+<span class="nc" id="L218">        nodeSB.append(&quot;\&quot;ino\&quot;:&quot;).append(++INODE_IDX);</span>
+<span class="nc" id="L219">        nodeSB.append(&quot;}&quot;);</span>
+
+        Set&lt;String&gt; children;
+<span class="nc" id="L222">        synchronized (n) { // keep findbugs happy</span>
+<span class="nc" id="L223">            children = n.getChildren();</span>
+<span class="nc" id="L224">        }</span>
+<span class="nc bnc" id="L225" title="All 4 branches missed.">        if (children != null &amp;&amp; children.size() &gt; 0) {</span>
+<span class="nc" id="L226">            System.out.print(&quot;[&quot; + nodeSB);</span>
+<span class="nc bnc" id="L227" title="All 2 branches missed.">            for (String child : children) {</span>
+<span class="nc bnc" id="L228" title="All 2 branches missed.">                printZnodeJson(dataTree, fullPath + (fullPath.equals(&quot;/&quot;) ? &quot;&quot; : &quot;/&quot;) + child, encoder);</span>
+<span class="nc" id="L229">            }</span>
+<span class="nc" id="L230">            System.out.print(&quot;]&quot;);</span>
+        } else {
+<span class="nc" id="L232">            System.out.print(nodeSB);</span>
+        }
+<span class="nc" id="L234">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

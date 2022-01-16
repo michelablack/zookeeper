@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FollowerRequestProcessor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum</a> &gt; <span class="el_source">FollowerRequestProcessor.java</span></div><h1>FollowerRequestProcessor.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum;
+
+import java.io.IOException;
+import java.util.concurrent.LinkedBlockingQueue;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.ZooDefs.OpCode;
+import org.apache.zookeeper.server.Request;
+import org.apache.zookeeper.server.RequestProcessor;
+import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.ZooKeeperCriticalThread;
+import org.apache.zookeeper.server.ZooTrace;
+import org.apache.zookeeper.txn.ErrorTxn;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This RequestProcessor forwards any requests that modify the state of the
+ * system to the Leader.
+ */
+public class FollowerRequestProcessor extends ZooKeeperCriticalThread implements RequestProcessor {
+
+<span class="nc" id="L40">    private static final Logger LOG = LoggerFactory.getLogger(FollowerRequestProcessor.class);</span>
+
+    public static final String SKIP_LEARNER_REQUEST_TO_NEXT_PROCESSOR = &quot;zookeeper.follower.skipLearnerRequestToNextProcessor&quot;;
+
+    private final boolean skipLearnerRequestToNextProcessor;
+
+    FollowerZooKeeperServer zks;
+
+    RequestProcessor nextProcessor;
+
+<span class="nc" id="L50">    LinkedBlockingQueue&lt;Request&gt; queuedRequests = new LinkedBlockingQueue&lt;Request&gt;();</span>
+
+<span class="nc" id="L52">    boolean finished = false;</span>
+
+    public FollowerRequestProcessor(FollowerZooKeeperServer zks, RequestProcessor nextProcessor) {
+<span class="nc" id="L55">        super(&quot;FollowerRequestProcessor:&quot; + zks.getServerId(), zks.getZooKeeperServerListener());</span>
+<span class="nc" id="L56">        this.zks = zks;</span>
+<span class="nc" id="L57">        this.nextProcessor = nextProcessor;</span>
+<span class="nc" id="L58">        this.skipLearnerRequestToNextProcessor = Boolean.getBoolean(SKIP_LEARNER_REQUEST_TO_NEXT_PROCESSOR);</span>
+<span class="nc" id="L59">        LOG.info(&quot;Initialized FollowerRequestProcessor with {} as {}&quot;, SKIP_LEARNER_REQUEST_TO_NEXT_PROCESSOR,</span>
+<span class="nc" id="L60">                skipLearnerRequestToNextProcessor);</span>
+<span class="nc" id="L61">    }</span>
+
+    @Override
+    public void run() {
+        try {
+<span class="nc bnc" id="L66" title="All 2 branches missed.">            while (!finished) {</span>
+<span class="nc" id="L67">                ServerMetrics.getMetrics().LEARNER_REQUEST_PROCESSOR_QUEUE_SIZE.add(queuedRequests.size());</span>
+
+<span class="nc" id="L69">                Request request = queuedRequests.take();</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">                if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L71">                    ZooTrace.logRequest(LOG, ZooTrace.CLIENT_REQUEST_TRACE_MASK, 'F', request, &quot;&quot;);</span>
+                }
+<span class="nc bnc" id="L73" title="All 2 branches missed.">                if (request == Request.requestOfDeath) {</span>
+<span class="nc" id="L74">                    break;</span>
+                }
+
+                // Screen quorum requests against ACLs first
+<span class="nc bnc" id="L78" title="All 2 branches missed.">                if (!zks.authWriteRequest(request)) {</span>
+<span class="nc" id="L79">                    continue;</span>
+                }
+
+                // We want to queue the request to be processed before we submit
+                // the request to the leader so that we are ready to receive
+                // the response
+<span class="nc" id="L85">                maybeSendRequestToNextProcessor(request);</span>
+
+<span class="nc bnc" id="L87" title="All 2 branches missed.">                if (request.isThrottled()) {</span>
+<span class="nc" id="L88">                    continue;</span>
+                }
+
+                // We now ship the request to the leader. As with all
+                // other quorum operations, sync also follows this code
+                // path, but different from others, we need to keep track
+                // of the sync operations this follower has pending, so we
+                // add it to pendingSyncs.
+<span class="nc bnc" id="L96" title="All 4 branches missed.">                switch (request.type) {</span>
+                case OpCode.sync:
+<span class="nc" id="L98">                    zks.pendingSyncs.add(request);</span>
+<span class="nc" id="L99">                    zks.getFollower().request(request);</span>
+<span class="nc" id="L100">                    break;</span>
+                case OpCode.create:
+                case OpCode.create2:
+                case OpCode.createTTL:
+                case OpCode.createContainer:
+                case OpCode.delete:
+                case OpCode.deleteContainer:
+                case OpCode.setData:
+                case OpCode.reconfig:
+                case OpCode.setACL:
+                case OpCode.multi:
+                case OpCode.check:
+<span class="nc" id="L112">                    zks.getFollower().request(request);</span>
+<span class="nc" id="L113">                    break;</span>
+                case OpCode.createSession:
+                case OpCode.closeSession:
+                    // Don't forward local sessions to the leader.
+<span class="nc bnc" id="L117" title="All 2 branches missed.">                    if (!request.isLocalSession()) {</span>
+<span class="nc" id="L118">                        zks.getFollower().request(request);</span>
+                    }
+                    break;
+                }
+<span class="nc" id="L122">            }</span>
+<span class="nc" id="L123">        } catch (RuntimeException e) { // spotbugs require explicit catch of RuntimeException</span>
+<span class="nc" id="L124">            handleException(this.getName(), e);</span>
+<span class="nc" id="L125">        } catch (Exception e) {</span>
+<span class="nc" id="L126">            handleException(this.getName(), e);</span>
+<span class="nc" id="L127">        }</span>
+<span class="nc" id="L128">        LOG.info(&quot;FollowerRequestProcessor exited loop!&quot;);</span>
+<span class="nc" id="L129">    }</span>
+
+    private void maybeSendRequestToNextProcessor(Request request) throws RequestProcessorException {
+<span class="nc bnc" id="L132" title="All 4 branches missed.">        if (skipLearnerRequestToNextProcessor &amp;&amp; request.isFromLearner()) {</span>
+<span class="nc" id="L133">            ServerMetrics.getMetrics().SKIP_LEARNER_REQUEST_TO_NEXT_PROCESSOR_COUNT.add(1);</span>
+        } else {
+<span class="nc" id="L135">            nextProcessor.processRequest(request);</span>
+        }
+<span class="nc" id="L137">    }</span>
+
+    public void processRequest(Request request) {
+<span class="nc" id="L140">        processRequest(request, true);</span>
+<span class="nc" id="L141">    }</span>
+
+    void processRequest(Request request, boolean checkForUpgrade) {
+<span class="nc bnc" id="L144" title="All 2 branches missed.">        if (!finished) {</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">            if (checkForUpgrade) {</span>
+                // Before sending the request, check if the request requires a
+                // global session and what we have is a local session. If so do
+                // an upgrade.
+<span class="nc" id="L149">                Request upgradeRequest = null;</span>
+                try {
+<span class="nc" id="L151">                    upgradeRequest = zks.checkUpgradeSession(request);</span>
+<span class="nc" id="L152">                } catch (KeeperException ke) {</span>
+<span class="nc bnc" id="L153" title="All 2 branches missed.">                    if (request.getHdr() != null) {</span>
+<span class="nc" id="L154">                        request.getHdr().setType(OpCode.error);</span>
+<span class="nc" id="L155">                        request.setTxn(new ErrorTxn(ke.code().intValue()));</span>
+                    }
+<span class="nc" id="L157">                    request.setException(ke);</span>
+<span class="nc" id="L158">                    LOG.warn(&quot;Error creating upgrade request&quot;, ke);</span>
+<span class="nc" id="L159">                } catch (IOException ie) {</span>
+<span class="nc" id="L160">                    LOG.error(&quot;Unexpected error in upgrade&quot;, ie);</span>
+<span class="nc" id="L161">                }</span>
+<span class="nc bnc" id="L162" title="All 2 branches missed.">                if (upgradeRequest != null) {</span>
+<span class="nc" id="L163">                    queuedRequests.add(upgradeRequest);</span>
+                }
+            }
+
+<span class="nc" id="L167">            queuedRequests.add(request);</span>
+        }
+<span class="nc" id="L169">    }</span>
+
+    public void shutdown() {
+<span class="nc" id="L172">        LOG.info(&quot;Shutting down&quot;);</span>
+<span class="nc" id="L173">        finished = true;</span>
+<span class="nc" id="L174">        queuedRequests.clear();</span>
+<span class="nc" id="L175">        queuedRequests.add(Request.requestOfDeath);</span>
+<span class="nc" id="L176">        nextProcessor.shutdown();</span>
+<span class="nc" id="L177">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

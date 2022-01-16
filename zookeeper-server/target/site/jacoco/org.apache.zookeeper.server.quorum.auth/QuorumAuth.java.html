@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>QuorumAuth.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum.auth</a> &gt; <span class="el_source">QuorumAuth.java</span></div><h1>QuorumAuth.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum.auth;
+
+import java.io.DataInputStream;
+import java.io.IOException;
+import org.apache.jute.BinaryInputArchive;
+import org.apache.zookeeper.server.quorum.QuorumAuthPacket;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+<span class="nc" id="L28">public class QuorumAuth {</span>
+
+<span class="nc" id="L30">    private static final Logger LOG = LoggerFactory.getLogger(QuorumAuth.class);</span>
+
+    public static final String QUORUM_SASL_AUTH_ENABLED = &quot;quorum.auth.enableSasl&quot;;
+    public static final String QUORUM_SERVER_SASL_AUTH_REQUIRED = &quot;quorum.auth.serverRequireSasl&quot;;
+    public static final String QUORUM_LEARNER_SASL_AUTH_REQUIRED = &quot;quorum.auth.learnerRequireSasl&quot;;
+
+    public static final String QUORUM_KERBEROS_SERVICE_PRINCIPAL = &quot;quorum.auth.kerberos.servicePrincipal&quot;;
+    public static final String QUORUM_KERBEROS_SERVICE_PRINCIPAL_DEFAULT_VALUE = &quot;zkquorum/localhost&quot;;
+
+    public static final String QUORUM_LEARNER_SASL_LOGIN_CONTEXT = &quot;quorum.auth.learner.saslLoginContext&quot;;
+    public static final String QUORUM_LEARNER_SASL_LOGIN_CONTEXT_DFAULT_VALUE = &quot;QuorumLearner&quot;;
+
+    public static final String QUORUM_SERVER_SASL_LOGIN_CONTEXT = &quot;quorum.auth.server.saslLoginContext&quot;;
+    public static final String QUORUM_SERVER_SASL_LOGIN_CONTEXT_DFAULT_VALUE = &quot;QuorumServer&quot;;
+
+    static final String QUORUM_SERVER_PROTOCOL_NAME = &quot;zookeeper-quorum&quot;;
+    static final String QUORUM_SERVER_SASL_DIGEST = &quot;zk-quorum-sasl-md5&quot;;
+    static final String QUORUM_AUTH_MESSAGE_TAG = &quot;qpconnect&quot;;
+
+    // this is negative, so that if a learner that does auth, connects to a
+    // server, it'll think the received packet is an authentication packet
+    public static final long QUORUM_AUTH_MAGIC_NUMBER = -0xa0dbcafecafe1234L;
+
+<span class="nc bnc" id="L53" title="All 2 branches missed.">    public enum Status {</span>
+<span class="nc" id="L54">        IN_PROGRESS(0),</span>
+<span class="nc" id="L55">        SUCCESS(1),</span>
+<span class="nc" id="L56">        ERROR(-1);</span>
+        private int status;
+
+<span class="nc" id="L59">        Status(int status) {</span>
+<span class="nc" id="L60">            this.status = status;</span>
+<span class="nc" id="L61">        }</span>
+
+        static Status getStatus(int status) {
+<span class="nc bnc" id="L64" title="All 4 branches missed.">            switch (status) {</span>
+            case 0:
+<span class="nc" id="L66">                return IN_PROGRESS;</span>
+            case 1:
+<span class="nc" id="L68">                return SUCCESS;</span>
+            case -1:
+<span class="nc" id="L70">                return ERROR;</span>
+            default:
+<span class="nc" id="L72">                LOG.error(&quot;Unknown status:{}!&quot;, status);</span>
+<span class="nc bnc" id="L73" title="All 2 branches missed.">                assert false : &quot;Unknown status!&quot;;</span>
+<span class="nc" id="L74">                return ERROR;</span>
+            }
+        }
+
+        int status() {
+<span class="nc" id="L79">            return status;</span>
+        }
+    }
+
+    public static QuorumAuthPacket createPacket(Status status, byte[] response) {
+<span class="nc" id="L84">        return new QuorumAuthPacket(QUORUM_AUTH_MAGIC_NUMBER, status.status(), response);</span>
+    }
+
+    public static boolean nextPacketIsAuth(DataInputStream din) throws IOException {
+<span class="nc" id="L88">        din.mark(32);</span>
+<span class="nc" id="L89">        BinaryInputArchive bia = new BinaryInputArchive(din);</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">        boolean firstIsAuth = (bia.readLong(&quot;NO_TAG&quot;) == QuorumAuth.QUORUM_AUTH_MAGIC_NUMBER);</span>
+<span class="nc" id="L91">        din.reset();</span>
+<span class="nc" id="L92">        return firstIsAuth;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

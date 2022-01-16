@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ReadOnlyRequestProcessor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum</a> &gt; <span class="el_source">ReadOnlyRequestProcessor.java</span></div><h1>ReadOnlyRequestProcessor.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum;
+
+import java.io.IOException;
+import java.util.concurrent.LinkedBlockingQueue;
+import org.apache.zookeeper.KeeperException.Code;
+import org.apache.zookeeper.ZooDefs.OpCode;
+import org.apache.zookeeper.proto.ReplyHeader;
+import org.apache.zookeeper.server.Request;
+import org.apache.zookeeper.server.RequestProcessor;
+import org.apache.zookeeper.server.ZooKeeperCriticalThread;
+import org.apache.zookeeper.server.ZooKeeperServer;
+import org.apache.zookeeper.server.ZooTrace;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This processor is at the beginning of the ReadOnlyZooKeeperServer's
+ * processors chain. All it does is, it passes read-only operations (e.g.
+ * OpCode.getData, OpCode.exists) through to the next processor, but drops
+ * state-changing operations (e.g. OpCode.create, OpCode.setData).
+ */
+public class ReadOnlyRequestProcessor extends ZooKeeperCriticalThread implements RequestProcessor {
+
+<span class="nc" id="L42">    private static final Logger LOG = LoggerFactory.getLogger(ReadOnlyRequestProcessor.class);</span>
+
+<span class="nc" id="L44">    private final LinkedBlockingQueue&lt;Request&gt; queuedRequests = new LinkedBlockingQueue&lt;Request&gt;();</span>
+
+<span class="nc" id="L46">    private volatile boolean finished = false;</span>
+
+    private final RequestProcessor nextProcessor;
+
+    private final ZooKeeperServer zks;
+
+    public ReadOnlyRequestProcessor(ZooKeeperServer zks, RequestProcessor nextProcessor) {
+<span class="nc" id="L53">        super(&quot;ReadOnlyRequestProcessor:&quot; + zks.getServerId(), zks.getZooKeeperServerListener());</span>
+<span class="nc" id="L54">        this.zks = zks;</span>
+<span class="nc" id="L55">        this.nextProcessor = nextProcessor;</span>
+<span class="nc" id="L56">    }</span>
+
+    public void run() {
+        try {
+<span class="nc bnc" id="L60" title="All 2 branches missed.">            while (!finished) {</span>
+<span class="nc" id="L61">                Request request = queuedRequests.take();</span>
+
+                // log request
+<span class="nc bnc" id="L64" title="All 2 branches missed.">                if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L65">                    long traceMask = ZooTrace.CLIENT_REQUEST_TRACE_MASK;</span>
+<span class="nc bnc" id="L66" title="All 2 branches missed.">                    if (request.type == OpCode.ping) {</span>
+<span class="nc" id="L67">                        traceMask = ZooTrace.CLIENT_PING_TRACE_MASK;</span>
+                    }
+<span class="nc" id="L69">                    ZooTrace.logRequest(LOG, traceMask, 'R', request, &quot;&quot;);</span>
+                }
+<span class="nc bnc" id="L71" title="All 2 branches missed.">                if (Request.requestOfDeath == request) {</span>
+<span class="nc" id="L72">                    break;</span>
+                }
+
+                // filter read requests
+<span class="nc bnc" id="L76" title="All 3 branches missed.">                switch (request.type) {</span>
+                case OpCode.sync:
+                case OpCode.create:
+                case OpCode.create2:
+                case OpCode.createTTL:
+                case OpCode.createContainer:
+                case OpCode.delete:
+                case OpCode.deleteContainer:
+                case OpCode.setData:
+                case OpCode.reconfig:
+                case OpCode.setACL:
+                case OpCode.multi:
+                case OpCode.check:
+<span class="nc" id="L89">                    sendErrorResponse(request);</span>
+<span class="nc" id="L90">                    continue;</span>
+                case OpCode.closeSession:
+                case OpCode.createSession:
+<span class="nc bnc" id="L93" title="All 2 branches missed.">                    if (!request.isLocalSession()) {</span>
+<span class="nc" id="L94">                        sendErrorResponse(request);</span>
+<span class="nc" id="L95">                        continue;</span>
+                    }
+                }
+
+                // proceed to the next processor
+<span class="nc bnc" id="L100" title="All 2 branches missed.">                if (nextProcessor != null) {</span>
+<span class="nc" id="L101">                    nextProcessor.processRequest(request);</span>
+                }
+<span class="nc" id="L103">            }</span>
+<span class="nc" id="L104">        } catch (Exception e) {</span>
+<span class="nc" id="L105">            handleException(this.getName(), e);</span>
+<span class="nc" id="L106">        }</span>
+<span class="nc" id="L107">        LOG.info(&quot;ReadOnlyRequestProcessor exited loop!&quot;);</span>
+<span class="nc" id="L108">    }</span>
+
+    private void sendErrorResponse(Request request) {
+<span class="nc" id="L111">        ReplyHeader hdr = new ReplyHeader(</span>
+                request.cxid,
+<span class="nc" id="L113">                zks.getZKDatabase().getDataTreeLastProcessedZxid(),</span>
+<span class="nc" id="L114">                Code.NOTREADONLY.intValue());</span>
+        try {
+<span class="nc" id="L116">            request.cnxn.sendResponse(hdr, null, null);</span>
+<span class="nc" id="L117">        } catch (IOException e) {</span>
+<span class="nc" id="L118">            LOG.error(&quot;IO exception while sending response&quot;, e);</span>
+<span class="nc" id="L119">        }</span>
+<span class="nc" id="L120">    }</span>
+
+    @Override
+    public void processRequest(Request request) {
+<span class="nc bnc" id="L124" title="All 2 branches missed.">        if (!finished) {</span>
+<span class="nc" id="L125">            queuedRequests.add(request);</span>
+        }
+<span class="nc" id="L127">    }</span>
+
+    @Override
+    public void shutdown() {
+<span class="nc" id="L131">        finished = true;</span>
+<span class="nc" id="L132">        queuedRequests.clear();</span>
+<span class="nc" id="L133">        queuedRequests.add(Request.requestOfDeath);</span>
+<span class="nc" id="L134">        nextProcessor.shutdown();</span>
+<span class="nc" id="L135">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

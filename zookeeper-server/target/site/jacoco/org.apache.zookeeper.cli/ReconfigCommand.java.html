@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ReconfigCommand.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.cli</a> &gt; <span class="el_source">ReconfigCommand.java</span></div><h1>ReconfigCommand.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.cli;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import java.io.FileInputStream;
+import java.util.Properties;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.admin.ZooKeeperAdmin;
+import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
+
+/**
+ * reconfig command for cli
+ */
+public class ReconfigCommand extends CliCommand {
+
+<span class="nc" id="L38">    private static Options options = new Options();</span>
+
+    /* joining - comma separated list of server config strings for servers to be added to the ensemble.
+     * Each entry is identical in syntax as it would appear in a configuration file. Only used for
+     * incremental reconfigurations.
+     */
+    private String joining;
+
+    /* leaving - comma separated list of server IDs to be removed from the ensemble. Only used for
+     * incremental reconfigurations.
+     */
+    private String leaving;
+
+    /* members - comma separated list of new membership information (e.g., contents of a membership
+     * configuration file) - for use only with a non-incremental reconfiguration. This may be specified
+     * manually via the -members flag or it will automatically be filled in by reading the contents
+     * of an actual configuration file using the -file flag.
+     */
+    private String members;
+
+    /* version - version of config from which we want to reconfigure - if current config is different
+     * reconfiguration will fail. Should be committed from the CLI to disable this option.
+<span class="nc" id="L60">     */ long version = -1;</span>
+    private CommandLine cl;
+
+    static {
+<span class="nc" id="L64">        options.addOption(&quot;s&quot;, false, &quot;stats&quot;);</span>
+<span class="nc" id="L65">        options.addOption(&quot;v&quot;, true, &quot;required current config version&quot;);</span>
+<span class="nc" id="L66">        options.addOption(&quot;file&quot;, true, &quot;path of config file to parse for membership&quot;);</span>
+<span class="nc" id="L67">        options.addOption(&quot;members&quot;, true, &quot;comma-separated list of config strings for &quot; + &quot;non-incremental reconfig&quot;);</span>
+<span class="nc" id="L68">        options.addOption(&quot;add&quot;, true, &quot;comma-separated list of config strings for &quot; + &quot;new servers&quot;);</span>
+<span class="nc" id="L69">        options.addOption(&quot;remove&quot;, true, &quot;comma-separated list of server IDs to remove&quot;);</span>
+<span class="nc" id="L70">    }</span>
+
+    public ReconfigCommand() {
+<span class="nc" id="L73">        super(&quot;reconfig&quot;, &quot;[-s] &quot;</span>
+                          + &quot;[-v version] &quot;
+                          + &quot;[[-file path] | &quot;
+                          + &quot;[-members serverID=host:port1:port2;port3[,...]*]] | &quot;
+                          + &quot;[-add serverId=host:port1:port2;port3[,...]]* &quot;
+                          + &quot;[-remove serverId[,...]*]&quot;);
+<span class="nc" id="L79">    }</span>
+
+    @Override
+    public CliCommand parse(String[] cmdArgs) throws CliParseException {
+<span class="nc" id="L83">        joining = null;</span>
+<span class="nc" id="L84">        leaving = null;</span>
+<span class="nc" id="L85">        members = null;</span>
+<span class="nc" id="L86">        DefaultParser parser = new DefaultParser();</span>
+        try {
+<span class="nc" id="L88">            cl = parser.parse(options, cmdArgs);</span>
+<span class="nc" id="L89">        } catch (ParseException ex) {</span>
+<span class="nc" id="L90">            throw new CliParseException(ex);</span>
+<span class="nc" id="L91">        }</span>
+<span class="nc bnc" id="L92" title="All 8 branches missed.">        if (!(cl.hasOption(&quot;file&quot;) || cl.hasOption(&quot;members&quot;)) &amp;&amp; !cl.hasOption(&quot;add&quot;) &amp;&amp; !cl.hasOption(&quot;remove&quot;)) {</span>
+<span class="nc" id="L93">            throw new CliParseException(getUsageStr());</span>
+        }
+<span class="nc bnc" id="L95" title="All 2 branches missed.">        if (cl.hasOption(&quot;v&quot;)) {</span>
+            try {
+<span class="nc" id="L97">                version = Long.parseLong(cl.getOptionValue(&quot;v&quot;), 16);</span>
+<span class="nc" id="L98">            } catch (NumberFormatException e) {</span>
+<span class="nc" id="L99">                throw new CliParseException(&quot;-v must be followed by a long (configuration version)&quot;);</span>
+<span class="nc" id="L100">            }</span>
+        } else {
+<span class="nc" id="L102">            version = -1;</span>
+        }
+
+        // Simple error checking for conflicting modes
+<span class="nc bnc" id="L106" title="All 8 branches missed.">        if ((cl.hasOption(&quot;file&quot;) || cl.hasOption(&quot;members&quot;)) &amp;&amp; (cl.hasOption(&quot;add&quot;) || cl.hasOption(&quot;remove&quot;))) {</span>
+<span class="nc" id="L107">            throw new CliParseException(&quot;Can't use -file or -members together with -add or -remove (mixing incremental&quot;</span>
+                                        + &quot; and non-incremental modes is not allowed)&quot;);
+        }
+<span class="nc bnc" id="L110" title="All 4 branches missed.">        if (cl.hasOption(&quot;file&quot;) &amp;&amp; cl.hasOption(&quot;members&quot;)) {</span>
+<span class="nc" id="L111">            throw new CliParseException(&quot;Can't use -file and -members together (conflicting non-incremental modes)&quot;);</span>
+        }
+
+        // Set the joining/leaving/members values based on the mode we're in
+<span class="nc bnc" id="L115" title="All 2 branches missed.">        if (cl.hasOption(&quot;add&quot;)) {</span>
+<span class="nc" id="L116">            joining = cl.getOptionValue(&quot;add&quot;).toLowerCase();</span>
+        }
+<span class="nc bnc" id="L118" title="All 2 branches missed.">        if (cl.hasOption(&quot;remove&quot;)) {</span>
+<span class="nc" id="L119">            leaving = cl.getOptionValue(&quot;remove&quot;).toLowerCase();</span>
+        }
+<span class="nc bnc" id="L121" title="All 2 branches missed.">        if (cl.hasOption(&quot;members&quot;)) {</span>
+<span class="nc" id="L122">            members = cl.getOptionValue(&quot;members&quot;).toLowerCase();</span>
+        }
+<span class="nc bnc" id="L124" title="All 2 branches missed.">        if (cl.hasOption(&quot;file&quot;)) {</span>
+            try {
+<span class="nc" id="L126">                Properties dynamicCfg = new Properties();</span>
+<span class="nc" id="L127">                try (FileInputStream inConfig = new FileInputStream(cl.getOptionValue(&quot;file&quot;))) {</span>
+<span class="nc" id="L128">                    dynamicCfg.load(inConfig);</span>
+                }
+                //check that membership makes sense; leader will make these checks again
+                //don't check for leader election ports since
+                //client doesn't know what leader election alg is used
+<span class="nc" id="L133">                members = QuorumPeerConfig.parseDynamicConfig(dynamicCfg, 0, true, false, null).toString();</span>
+<span class="nc" id="L134">            } catch (Exception e) {</span>
+<span class="nc" id="L135">                throw new CliParseException(&quot;Error processing &quot; + cl.getOptionValue(&quot;file&quot;) + e.getMessage());</span>
+<span class="nc" id="L136">            }</span>
+        }
+<span class="nc" id="L138">        return this;</span>
+    }
+
+    @Override
+    public boolean exec() throws CliException {
+        try {
+<span class="nc" id="L144">            Stat stat = new Stat();</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">            if (!(zk instanceof ZooKeeperAdmin)) {</span>
+                // This should never happen when executing reconfig command line,
+                // because it is guaranteed that we have a ZooKeeperAdmin instance ready
+                // to use in CliCommand stack.
+                // The only exception would be in test code where clients can directly set
+                // ZooKeeper object to ZooKeeperMain.
+<span class="nc" id="L151">                return false;</span>
+            }
+
+<span class="nc" id="L154">            byte[] curConfig = ((ZooKeeperAdmin) zk).reconfigure(joining, leaving, members, version, stat);</span>
+<span class="nc" id="L155">            out.println(&quot;Committed new configuration:\n&quot; + new String(curConfig, UTF_8));</span>
+
+<span class="nc bnc" id="L157" title="All 2 branches missed.">            if (cl.hasOption(&quot;s&quot;)) {</span>
+<span class="nc" id="L158">                new StatPrinter(out).print(stat);</span>
+            }
+<span class="nc" id="L160">        } catch (KeeperException | InterruptedException ex) {</span>
+<span class="nc" id="L161">            throw new CliWrapperException(ex);</span>
+<span class="nc" id="L162">        }</span>
+<span class="nc" id="L163">        return false;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>WatcherCleaner.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.watch</a> &gt; <span class="el_source">WatcherCleaner.java</span></div><h1>WatcherCleaner.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.watch;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.zookeeper.common.Time;
+import org.apache.zookeeper.server.RateLogger;
+import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.WorkerService;
+import org.apache.zookeeper.server.WorkerService.WorkRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Thread used to lazily clean up the closed watcher, it will trigger the
+ * clean up when the dead watchers get certain number or some number of
+ * seconds has elapsed since last clean up.
+ *
+ * Cost of running it:
+ *
+ * - need to go through all the paths even if the watcher may only
+ *   watching a single path
+ * - block in the path BitHashSet when we try to check the dead watcher
+ *   which won't block other stuff
+ */
+public class WatcherCleaner extends Thread {
+
+<span class="nc" id="L47">    private static final Logger LOG = LoggerFactory.getLogger(WatcherCleaner.class);</span>
+<span class="nc" id="L48">    private final RateLogger RATE_LOGGER = new RateLogger(LOG);</span>
+
+<span class="nc" id="L50">    private volatile boolean stopped = false;</span>
+<span class="nc" id="L51">    private final Object cleanEvent = new Object();</span>
+<span class="nc" id="L52">    private final Object processingCompletedEvent = new Object();</span>
+    private final WorkerService cleaners;
+
+    private final Set&lt;Integer&gt; deadWatchers;
+    private final IDeadWatcherListener listener;
+    private final int watcherCleanThreshold;
+    private final int watcherCleanIntervalInSeconds;
+    private final int maxInProcessingDeadWatchers;
+<span class="nc" id="L60">    private final AtomicInteger totalDeadWatchers = new AtomicInteger();</span>
+
+    public WatcherCleaner(IDeadWatcherListener listener) {
+<span class="nc" id="L63">        this(</span>
+            listener,
+<span class="nc" id="L65">            Integer.getInteger(&quot;zookeeper.watcherCleanThreshold&quot;, 1000),</span>
+<span class="nc" id="L66">            Integer.getInteger(&quot;zookeeper.watcherCleanIntervalInSeconds&quot;, 600),</span>
+<span class="nc" id="L67">            Integer.getInteger(&quot;zookeeper.watcherCleanThreadsNum&quot;, 2),</span>
+<span class="nc" id="L68">            Integer.getInteger(&quot;zookeeper.maxInProcessingDeadWatchers&quot;, -1));</span>
+<span class="nc" id="L69">    }</span>
+
+<span class="nc" id="L71">    public WatcherCleaner(IDeadWatcherListener listener, int watcherCleanThreshold, int watcherCleanIntervalInSeconds, int watcherCleanThreadsNum, int maxInProcessingDeadWatchers) {</span>
+<span class="nc" id="L72">        this.listener = listener;</span>
+<span class="nc" id="L73">        this.watcherCleanThreshold = watcherCleanThreshold;</span>
+<span class="nc" id="L74">        this.watcherCleanIntervalInSeconds = watcherCleanIntervalInSeconds;</span>
+<span class="nc" id="L75">        int suggestedMaxInProcessingThreshold = watcherCleanThreshold * watcherCleanThreadsNum;</span>
+<span class="nc bnc" id="L76" title="All 4 branches missed.">        if (maxInProcessingDeadWatchers &gt; 0 &amp;&amp; maxInProcessingDeadWatchers &lt; suggestedMaxInProcessingThreshold) {</span>
+<span class="nc" id="L77">            maxInProcessingDeadWatchers = suggestedMaxInProcessingThreshold;</span>
+<span class="nc" id="L78">            LOG.info(</span>
+                &quot;The maxInProcessingDeadWatchers config is smaller than the suggested one, change it to use {}&quot;,
+<span class="nc" id="L80">                maxInProcessingDeadWatchers);</span>
+        }
+<span class="nc" id="L82">        this.maxInProcessingDeadWatchers = maxInProcessingDeadWatchers;</span>
+<span class="nc" id="L83">        this.deadWatchers = new HashSet&lt;Integer&gt;();</span>
+<span class="nc" id="L84">        this.cleaners = new WorkerService(&quot;DeadWatcherCleanner&quot;, watcherCleanThreadsNum, false);</span>
+
+<span class="nc" id="L86">        LOG.info(</span>
+            &quot;watcherCleanThreshold={}, watcherCleanIntervalInSeconds={}&quot;
+                + &quot;, watcherCleanThreadsNum={}, maxInProcessingDeadWatchers={}&quot;,
+<span class="nc" id="L89">            watcherCleanThreshold,</span>
+<span class="nc" id="L90">            watcherCleanIntervalInSeconds,</span>
+<span class="nc" id="L91">            watcherCleanThreadsNum,</span>
+<span class="nc" id="L92">            maxInProcessingDeadWatchers);</span>
+<span class="nc" id="L93">    }</span>
+
+    public void addDeadWatcher(int watcherBit) {
+        // Wait if there are too many watchers waiting to be closed,
+        // this is will slow down the socket packet processing and
+        // the adding watches in the ZK pipeline.
+<span class="nc bnc" id="L99" title="All 6 branches missed.">        while (maxInProcessingDeadWatchers &gt; 0 &amp;&amp; !stopped &amp;&amp; totalDeadWatchers.get() &gt;= maxInProcessingDeadWatchers) {</span>
+            try {
+<span class="nc" id="L101">                RATE_LOGGER.rateLimitLog(&quot;Waiting for dead watchers cleaning&quot;);</span>
+<span class="nc" id="L102">                long startTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L103">                synchronized (processingCompletedEvent) {</span>
+<span class="nc" id="L104">                    processingCompletedEvent.wait(100);</span>
+<span class="nc" id="L105">                }</span>
+<span class="nc" id="L106">                long latency = Time.currentElapsedTime() - startTime;</span>
+<span class="nc" id="L107">                ServerMetrics.getMetrics().ADD_DEAD_WATCHER_STALL_TIME.add(latency);</span>
+<span class="nc" id="L108">            } catch (InterruptedException e) {</span>
+<span class="nc" id="L109">                LOG.info(&quot;Got interrupted while waiting for dead watches queue size&quot;);</span>
+<span class="nc" id="L110">                break;</span>
+<span class="nc" id="L111">            }</span>
+        }
+<span class="nc" id="L113">        synchronized (this) {</span>
+<span class="nc bnc" id="L114" title="All 2 branches missed.">            if (deadWatchers.add(watcherBit)) {</span>
+<span class="nc" id="L115">                totalDeadWatchers.incrementAndGet();</span>
+<span class="nc" id="L116">                ServerMetrics.getMetrics().DEAD_WATCHERS_QUEUED.add(1);</span>
+<span class="nc bnc" id="L117" title="All 2 branches missed.">                if (deadWatchers.size() &gt;= watcherCleanThreshold) {</span>
+<span class="nc" id="L118">                    synchronized (cleanEvent) {</span>
+<span class="nc" id="L119">                        cleanEvent.notifyAll();</span>
+<span class="nc" id="L120">                    }</span>
+                }
+            }
+<span class="nc" id="L123">        }</span>
+<span class="nc" id="L124">    }</span>
+
+    @Override
+    public void run() {
+<span class="nc bnc" id="L128" title="All 2 branches missed.">        while (!stopped) {</span>
+<span class="nc" id="L129">            synchronized (cleanEvent) {</span>
+                try {
+                    // add some jitter to avoid cleaning dead watchers at the
+                    // same time in the quorum
+<span class="nc bnc" id="L133" title="All 4 branches missed.">                    if (!stopped &amp;&amp; deadWatchers.size() &lt; watcherCleanThreshold) {</span>
+<span class="nc" id="L134">                        int maxWaitMs = (watcherCleanIntervalInSeconds</span>
+<span class="nc" id="L135">                                         + ThreadLocalRandom.current().nextInt(watcherCleanIntervalInSeconds / 2 + 1)) * 1000;</span>
+<span class="nc" id="L136">                        cleanEvent.wait(maxWaitMs);</span>
+                    }
+<span class="nc" id="L138">                } catch (InterruptedException e) {</span>
+<span class="nc" id="L139">                    LOG.info(&quot;Received InterruptedException while waiting for cleanEvent&quot;);</span>
+<span class="nc" id="L140">                    break;</span>
+<span class="nc" id="L141">                }</span>
+<span class="nc" id="L142">            }</span>
+
+<span class="nc bnc" id="L144" title="All 2 branches missed.">            if (deadWatchers.isEmpty()) {</span>
+<span class="nc" id="L145">                continue;</span>
+            }
+
+<span class="nc" id="L148">            synchronized (this) {</span>
+                // Clean the dead watchers need to go through all the current
+                // watches, which is pretty heavy and may take a second if
+                // there are millions of watches, that's why we're doing lazily
+                // batch clean up in a separate thread with a snapshot of the
+                // current dead watchers.
+<span class="nc" id="L154">                final Set&lt;Integer&gt; snapshot = new HashSet&lt;Integer&gt;(deadWatchers);</span>
+<span class="nc" id="L155">                deadWatchers.clear();</span>
+<span class="nc" id="L156">                int total = snapshot.size();</span>
+<span class="nc" id="L157">                LOG.info(&quot;Processing {} dead watchers&quot;, total);</span>
+<span class="nc" id="L158">                cleaners.schedule(new WorkRequest() {</span>
+                    @Override
+                    public void doWork() throws Exception {
+<span class="nc" id="L161">                        long startTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L162">                        listener.processDeadWatchers(snapshot);</span>
+<span class="nc" id="L163">                        long latency = Time.currentElapsedTime() - startTime;</span>
+<span class="nc" id="L164">                        LOG.info(&quot;Takes {} to process {} watches&quot;, latency, total);</span>
+<span class="nc" id="L165">                        ServerMetrics.getMetrics().DEAD_WATCHERS_CLEANER_LATENCY.add(latency);</span>
+<span class="nc" id="L166">                        ServerMetrics.getMetrics().DEAD_WATCHERS_CLEARED.add(total);</span>
+<span class="nc" id="L167">                        totalDeadWatchers.addAndGet(-total);</span>
+<span class="nc" id="L168">                        synchronized (processingCompletedEvent) {</span>
+<span class="nc" id="L169">                            processingCompletedEvent.notifyAll();</span>
+<span class="nc" id="L170">                        }</span>
+<span class="nc" id="L171">                    }</span>
+                });
+<span class="nc" id="L173">            }</span>
+        }
+<span class="nc" id="L175">        LOG.info(&quot;WatcherCleaner thread exited&quot;);</span>
+<span class="nc" id="L176">    }</span>
+
+    public void shutdown() {
+<span class="nc" id="L179">        stopped = true;</span>
+<span class="nc" id="L180">        deadWatchers.clear();</span>
+<span class="nc" id="L181">        cleaners.stop();</span>
+<span class="nc" id="L182">        this.interrupt();</span>
+<span class="nc bnc" id="L183" title="All 2 branches missed.">        if (LOG.isInfoEnabled()) {</span>
+<span class="nc" id="L184">            LOG.info(&quot;WatcherCleaner thread shutdown is initiated&quot;);</span>
+        }
+<span class="nc" id="L186">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

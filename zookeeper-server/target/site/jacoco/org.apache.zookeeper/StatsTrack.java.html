@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>StatsTrack.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper</a> &gt; <span class="el_source">StatsTrack.java</span></div><h1>StatsTrack.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.regex.Pattern;
+import org.apache.zookeeper.common.StringUtils;
+
+/**
+ * a class that represents the stats associated with quotas
+ */
+public class StatsTrack {
+
+    private static final String countStr = &quot;count&quot;;
+    private static final String countHardLimitStr = &quot;countHardLimit&quot;;
+
+    private static final String byteStr = &quot;bytes&quot;;
+    private static final String byteHardLimitStr = &quot;byteHardLimit&quot;;
+
+<span class="nc" id="L41">    private final Map&lt;String, Long&gt; stats = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L42">    private static final Pattern PAIRS_SEPARATOR = Pattern.compile(&quot;[,;]+&quot;);</span>
+
+    /**
+     * a default constructor for
+     * stats
+     */
+    public StatsTrack() {
+<span class="nc" id="L49">        this(&quot;&quot;);</span>
+<span class="nc" id="L50">    }</span>
+
+    /**
+     *
+     * @param stat the byte[] stat to be initialized with
+     */
+    public StatsTrack(byte[] stat) {
+<span class="nc" id="L57">        this(new String(stat, StandardCharsets.UTF_8));</span>
+<span class="nc" id="L58">    }</span>
+
+    /**
+     * the stat string should be of the form key1str=long,key2str=long,..
+     * where either , or ; are valid separators
+     * uninitialized values are returned as -1
+     * @param stat the stat string to be initialized with
+     */
+<span class="nc" id="L66">    public StatsTrack(String stat) {</span>
+<span class="nc" id="L67">        this.stats.clear();</span>
+<span class="nc bnc" id="L68" title="All 4 branches missed.">        if (stat == null || stat.length() == 0) {</span>
+<span class="nc" id="L69">            return;</span>
+        }
+<span class="nc" id="L71">        String[] keyValuePairs = PAIRS_SEPARATOR.split(stat);</span>
+<span class="nc bnc" id="L72" title="All 2 branches missed.">        for (String keyValuePair : keyValuePairs) {</span>
+<span class="nc" id="L73">            String[] kv = keyValuePair.split(&quot;=&quot;);</span>
+<span class="nc bnc" id="L74" title="All 2 branches missed.">            this.stats.put(kv[0], Long.parseLong(StringUtils.isEmpty(kv[1]) ? &quot;-1&quot; : kv[1]));</span>
+        }
+<span class="nc" id="L76">    }</span>
+
+
+    /**
+     * get the count of nodes allowed as part of quota
+     *
+     * @return the count as part of this string
+     */
+    public long getCount() {
+<span class="nc" id="L85">        return getValue(countStr);</span>
+    }
+
+    /**
+     * set the count for this stat tracker.
+     *
+     * @param count
+     *            the count to set with
+     */
+    public void setCount(long count) {
+<span class="nc" id="L95">        setValue(countStr, count);</span>
+<span class="nc" id="L96">    }</span>
+
+    /**
+     * get the count of nodes allowed as part of quota (hard limit)
+     *
+     * @return the count as part of this string
+     */
+    public long getCountHardLimit() {
+<span class="nc" id="L104">        return getValue(countHardLimitStr);</span>
+    }
+
+    /**
+     * set the count hard limit
+     *
+     * @param count the count limit to set
+     */
+    public void setCountHardLimit(long count) {
+<span class="nc" id="L113">        setValue(countHardLimitStr, count);</span>
+<span class="nc" id="L114">    }</span>
+
+    /**
+     * get the count of bytes allowed as part of quota
+     *
+     * @return the bytes as part of this string
+     */
+    public long getBytes() {
+<span class="nc" id="L122">        return getValue(byteStr);</span>
+    }
+
+    /**
+     * set the bytes for this stat tracker.
+     *
+     * @param bytes
+     *            the bytes to set with
+     */
+    public void setBytes(long bytes) {
+<span class="nc" id="L132">        setValue(byteStr, bytes);</span>
+<span class="nc" id="L133">    }</span>
+
+    /**
+     * get the count of bytes allowed as part of quota (hard limit)
+     *
+     * @return the bytes as part of this string
+     */
+    public long getByteHardLimit() {
+<span class="nc" id="L141">        return getValue(byteHardLimitStr);</span>
+    }
+
+    /**
+     * set the byte hard limit
+     *
+     * @param bytes the byte limit to set
+     */
+    public void setByteHardLimit(long bytes) {
+<span class="nc" id="L150">        setValue(byteHardLimitStr, bytes);</span>
+<span class="nc" id="L151">    }</span>
+
+    /**
+     * get helper to lookup a given key
+     *
+     * @param key the key to lookup
+     * @return key's value or -1 if it doesn't exist
+     */
+    private long getValue(String key) {
+<span class="nc" id="L160">        Long val = this.stats.get(key);</span>
+<span class="nc bnc" id="L161" title="All 2 branches missed.">        return val == null ? -1 : val.longValue();</span>
+    }
+
+    /**
+     * set helper to set the value for the specified key
+     *
+     * @param key   the key to set
+     * @param value the value to set
+     */
+    private void setValue(String key, long value) {
+<span class="nc" id="L171">        this.stats.put(key, value);</span>
+<span class="nc" id="L172">    }</span>
+
+    /*
+     * returns the string that maps to this stat tracking.
+     *
+     * Builds a string of the form
+     * &quot;count=4,bytes=5=;countHardLimit=10;byteHardLimit=10&quot;
+     *
+     * This string is slightly hacky to preserve compatibility with 3.4.3 and
+     * older parser. In particular, count must be first, bytes must be second,
+     * all new fields must use a separator that is not a &quot;,&quot; (so, &quot;;&quot;), and the
+     * seemingly spurious &quot;=&quot; after the bytes field is essential to allowing
+     * it to be parseable by the old parsing code.
+     */
+    @Override
+    public String toString() {
+<span class="nc" id="L188">        StringBuilder buf = new StringBuilder();</span>
+<span class="nc" id="L189">        ArrayList&lt;String&gt; keys = new ArrayList&lt;&gt;(stats.keySet());</span>
+
+        // Special handling for count=,byte= to enforce them coming first
+        // for backwards compatibility
+<span class="nc" id="L193">        keys.remove(countStr);</span>
+<span class="nc" id="L194">        keys.remove(byteStr);</span>
+<span class="nc" id="L195">        buf.append(countStr);</span>
+<span class="nc" id="L196">        buf.append(&quot;=&quot;);</span>
+<span class="nc" id="L197">        buf.append(getCount());</span>
+<span class="nc" id="L198">        buf.append(&quot;,&quot;);</span>
+<span class="nc" id="L199">        buf.append(byteStr);</span>
+<span class="nc" id="L200">        buf.append(&quot;=&quot;);</span>
+<span class="nc" id="L201">        buf.append(getBytes());</span>
+<span class="nc bnc" id="L202" title="All 2 branches missed.">        if (!keys.isEmpty()) {</span>
+            // Add extra = to trick old parsing code so it will ignore new flags
+<span class="nc" id="L204">            buf.append(&quot;=&quot;);</span>
+<span class="nc" id="L205">            Collections.sort(keys);</span>
+<span class="nc bnc" id="L206" title="All 2 branches missed.">            for (String key : keys) {</span>
+<span class="nc" id="L207">                buf.append(&quot;;&quot;);</span>
+<span class="nc" id="L208">                buf.append(key);</span>
+<span class="nc" id="L209">                buf.append(&quot;=&quot;);</span>
+<span class="nc" id="L210">                buf.append(stats.get(key));</span>
+<span class="nc" id="L211">            }</span>
+        }
+<span class="nc" id="L213">        return buf.toString();</span>
+    }
+
+    public byte[] getStatsBytes() {
+<span class="nc" id="L217">        return toString().getBytes(StandardCharsets.UTF_8);</span>
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+<span class="nc bnc" id="L222" title="All 2 branches missed.">        if (this == o) {</span>
+<span class="nc" id="L223">            return true;</span>
+        }
+<span class="nc bnc" id="L225" title="All 4 branches missed.">        if (o == null || getClass() != o.getClass()) {</span>
+<span class="nc" id="L226">            return false;</span>
+        }
+<span class="nc" id="L228">        final StatsTrack that = (StatsTrack) o;</span>
+<span class="nc" id="L229">        return Objects.equals(stats, that.stats);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L234">        return Objects.hash(stats);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

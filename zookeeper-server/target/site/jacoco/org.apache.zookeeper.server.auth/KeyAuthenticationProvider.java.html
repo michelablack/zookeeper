@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>KeyAuthenticationProvider.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.auth</a> &gt; <span class="el_source">KeyAuthenticationProvider.java</span></div><h1>KeyAuthenticationProvider.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.auth;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.NoNodeException;
+import org.apache.zookeeper.data.Id;
+import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.server.ZKDatabase;
+import org.apache.zookeeper.server.ZooKeeperServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/*
+ * This class is a sample implementation of being passed the ZooKeeperServer
+ * handle in the constructor, and reading data from zknodes to authenticate.
+ * At a minimum, a real Auth provider would need to override validate() to
+ * e.g. perform certificate validation of auth based a public key.
+ *
+ * See the &quot;Pluggable ZooKeeper authentication&quot; section of the
+ * &quot;Zookeeper Programmer's Guide&quot; for general details of implementing an
+ * authentication plugin. e.g.
+ * http://zookeeper.apache.org/doc/trunk/zookeeperProgrammers.html#sc_ZooKeeperPluggableAuthentication
+ *
+ * This class looks for a numeric &quot;key&quot; under the /key node.
+ * Authorization is granted if the user passes in as authorization a number
+ * which is a multiple of the key value, i.e.
+ *   (auth % key) == 0
+ * In a real implementation, you might do something like storing a public
+ * key in /key, and using it to verify that auth tokens passed in were signed
+ * by the corresponding private key.
+ *
+ * When the node /key does not exist, any auth token is accepted, so that
+ * bootstrapping may occur.
+ *
+ */
+<span class="nc" id="L54">public class KeyAuthenticationProvider extends ServerAuthenticationProvider {</span>
+
+<span class="nc" id="L56">    private static final Logger LOG = LoggerFactory.getLogger(KeyAuthenticationProvider.class);</span>
+
+    public String getScheme() {
+<span class="nc" id="L59">        return &quot;key&quot;;</span>
+    }
+
+    private byte[] getKey(ZooKeeperServer zks) {
+<span class="nc" id="L63">        ZKDatabase db = zks.getZKDatabase();</span>
+<span class="nc bnc" id="L64" title="All 2 branches missed.">        if (db != null) {</span>
+            try {
+<span class="nc" id="L66">                Stat stat = new Stat();</span>
+<span class="nc" id="L67">                return db.getData(&quot;/key&quot;, stat, null);</span>
+<span class="nc" id="L68">            } catch (NoNodeException e) {</span>
+<span class="nc" id="L69">                LOG.error(&quot;getData failed&quot;, e);</span>
+            }
+        }
+<span class="nc" id="L72">        return null;</span>
+    }
+
+    private boolean validate(byte[] key, byte[] auth) {
+        // perform arbitrary function (auth is a multiple of key)
+        try {
+<span class="nc" id="L78">            String keyStr = new String(key, UTF_8);</span>
+<span class="nc" id="L79">            String authStr = new String(auth, UTF_8);</span>
+<span class="nc" id="L80">            int keyVal = Integer.parseInt(keyStr);</span>
+<span class="nc" id="L81">            int authVal = Integer.parseInt(authStr);</span>
+<span class="nc bnc" id="L82" title="All 4 branches missed.">            if (keyVal != 0 &amp;&amp; ((authVal % keyVal) != 0)) {</span>
+<span class="nc" id="L83">                return false;</span>
+            }
+<span class="nc" id="L85">        } catch (NumberFormatException nfe) {</span>
+<span class="nc" id="L86">            LOG.error(&quot;bad formatting&quot;, nfe);</span>
+<span class="nc" id="L87">            return false;</span>
+<span class="nc" id="L88">        }</span>
+<span class="nc" id="L89">        return true;</span>
+    }
+
+    @Override
+    public KeeperException.Code handleAuthentication(ServerObjs serverObjs, byte[] authData) {
+<span class="nc" id="L94">        byte[] key = getKey(serverObjs.getZks());</span>
+<span class="nc" id="L95">        String authStr = new String(authData, UTF_8);</span>
+<span class="nc" id="L96">        String keyStr = &quot;&quot;;</span>
+<span class="nc bnc" id="L97" title="All 2 branches missed.">        if (key != null) {</span>
+<span class="nc bnc" id="L98" title="All 2 branches missed.">            if (!validate(key, authData)) {</span>
+<span class="nc" id="L99">                keyStr = new String(key, UTF_8);</span>
+<span class="nc" id="L100">                LOG.debug(&quot;KeyAuthenticationProvider handleAuthentication ({}, {}) -&gt; FAIL.\n&quot;, keyStr, authStr);</span>
+<span class="nc" id="L101">                return KeeperException.Code.AUTHFAILED;</span>
+            }
+        }
+        // default to allow, so the key can be initially written
+<span class="nc" id="L105">        LOG.debug(&quot;KeyAuthenticationProvider handleAuthentication -&gt; OK.\n&quot;);</span>
+        // NOTE: keyStr in addAuthInfo() sticks with the created node ACLs.
+        //   For transient keys or certificates, this presents a problem.
+        //   In that case, replace it with something non-ephemeral (or punt with null).
+        //
+        // BOTH addAuthInfo and an OK return-code are needed for authentication.
+<span class="nc" id="L111">        serverObjs.getCnxn().addAuthInfo(new Id(getScheme(), keyStr));</span>
+<span class="nc" id="L112">        return KeeperException.Code.OK;</span>
+    }
+
+    @Override
+    public boolean matches(ServerObjs serverObjs, MatchValues matchValues) {
+<span class="nc" id="L117">        return matchValues.getId().equals(matchValues.getAclExpr());</span>
+    }
+
+    @Override
+    public boolean isAuthenticated() {
+<span class="nc" id="L122">        return true;</span>
+    }
+
+    @Override
+    public boolean isValid(String id) {
+<span class="nc" id="L127">        return true;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

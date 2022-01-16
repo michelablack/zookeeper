@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>WorkerService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">WorkerService.java</span></div><h1>WorkerService.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.zookeeper.common.Time;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * WorkerService is a worker thread pool for running tasks and is implemented
+ * using one or more ExecutorServices. A WorkerService can support assignable
+ * threads, which it does by creating N separate single thread ExecutorServices,
+ * or non-assignable threads, which it does by creating a single N-thread
+ * ExecutorService.
+ *   - NIOServerCnxnFactory uses a non-assignable WorkerService because the
+ *     socket IO requests are order independent and allowing the
+ *     ExecutorService to handle thread assignment gives optimal performance.
+ *   - CommitProcessor uses an assignable WorkerService because requests for
+ *     a given session must be processed in order.
+ * ExecutorService provides queue management and thread restarting, so it's
+ * useful even with a single thread.
+ */
+public class WorkerService {
+
+<span class="nc" id="L48">    private static final Logger LOG = LoggerFactory.getLogger(WorkerService.class);</span>
+
+<span class="nc" id="L50">    private final ArrayList&lt;ExecutorService&gt; workers = new ArrayList&lt;ExecutorService&gt;();</span>
+
+    private final String threadNamePrefix;
+    private int numWorkerThreads;
+    private boolean threadsAreAssignable;
+<span class="nc" id="L55">    private long shutdownTimeoutMS = 5000;</span>
+
+<span class="nc" id="L57">    private volatile boolean stopped = true;</span>
+
+    /**
+     * @param name                  worker threads are named &amp;lt;name&amp;gt;Thread-##
+     * @param numThreads            number of worker threads (0 - N)
+     *                              If 0, scheduled work is run immediately by
+     *                              the calling thread.
+     * @param useAssignableThreads  whether the worker threads should be
+     *                              individually assignable or not
+     */
+<span class="nc" id="L67">    public WorkerService(String name, int numThreads, boolean useAssignableThreads) {</span>
+<span class="nc bnc" id="L68" title="All 2 branches missed.">        this.threadNamePrefix = (name == null ? &quot;&quot; : name) + &quot;Thread&quot;;</span>
+<span class="nc" id="L69">        this.numWorkerThreads = numThreads;</span>
+<span class="nc" id="L70">        this.threadsAreAssignable = useAssignableThreads;</span>
+<span class="nc" id="L71">        start();</span>
+<span class="nc" id="L72">    }</span>
+
+    /**
+     * Callers should implement a class extending WorkRequest in order to
+     * schedule work with the service.
+     */
+<span class="nc" id="L78">    public abstract static class WorkRequest {</span>
+
+        /**
+         * Must be implemented. Is called when the work request is run.
+         */
+        public abstract void doWork() throws Exception;
+
+        /**
+         * (Optional) If implemented, is called if the service is stopped
+         * or unable to schedule the request.
+         */
+        public void cleanup() {
+<span class="nc" id="L90">        }</span>
+
+    }
+
+    /**
+     * Schedule work to be done.  If a worker thread pool is not being
+     * used, work is done directly by this thread. This schedule API is
+     * for use with non-assignable WorkerServices. For assignable
+     * WorkerServices, will always run on the first thread.
+     */
+    public void schedule(WorkRequest workRequest) {
+<span class="nc" id="L101">        schedule(workRequest, 0);</span>
+<span class="nc" id="L102">    }</span>
+
+    /**
+     * Schedule work to be done by the thread assigned to this id. Thread
+     * assignment is a single mod operation on the number of threads.  If a
+     * worker thread pool is not being used, work is done directly by
+     * this thread.
+     */
+    public void schedule(WorkRequest workRequest, long id) {
+<span class="nc bnc" id="L111" title="All 2 branches missed.">        if (stopped) {</span>
+<span class="nc" id="L112">            workRequest.cleanup();</span>
+<span class="nc" id="L113">            return;</span>
+        }
+
+<span class="nc" id="L116">        ScheduledWorkRequest scheduledWorkRequest = new ScheduledWorkRequest(workRequest);</span>
+
+        // If we have a worker thread pool, use that; otherwise, do the work
+        // directly.
+<span class="nc" id="L120">        int size = workers.size();</span>
+<span class="nc bnc" id="L121" title="All 2 branches missed.">        if (size &gt; 0) {</span>
+            try {
+                // make sure to map negative ids as well to [0, size-1]
+<span class="nc" id="L124">                int workerNum = ((int) (id % size) + size) % size;</span>
+<span class="nc" id="L125">                ExecutorService worker = workers.get(workerNum);</span>
+<span class="nc" id="L126">                worker.execute(scheduledWorkRequest);</span>
+<span class="nc" id="L127">            } catch (RejectedExecutionException e) {</span>
+<span class="nc" id="L128">                LOG.warn(&quot;ExecutorService rejected execution&quot;, e);</span>
+<span class="nc" id="L129">                workRequest.cleanup();</span>
+<span class="nc" id="L130">            }</span>
+        } else {
+            // When there is no worker thread pool, do the work directly
+            // and wait for its completion
+<span class="nc" id="L134">            scheduledWorkRequest.run();</span>
+        }
+<span class="nc" id="L136">    }</span>
+
+    private class ScheduledWorkRequest implements Runnable {
+
+        private final WorkRequest workRequest;
+
+<span class="nc" id="L142">        ScheduledWorkRequest(WorkRequest workRequest) {</span>
+<span class="nc" id="L143">            this.workRequest = workRequest;</span>
+<span class="nc" id="L144">        }</span>
+
+        @Override
+        public void run() {
+            try {
+                // Check if stopped while request was on queue
+<span class="nc bnc" id="L150" title="All 2 branches missed.">                if (stopped) {</span>
+<span class="nc" id="L151">                    workRequest.cleanup();</span>
+<span class="nc" id="L152">                    return;</span>
+                }
+<span class="nc" id="L154">                workRequest.doWork();</span>
+<span class="nc" id="L155">            } catch (Exception e) {</span>
+<span class="nc" id="L156">                LOG.warn(&quot;Unexpected exception&quot;, e);</span>
+<span class="nc" id="L157">                workRequest.cleanup();</span>
+<span class="nc" id="L158">            }</span>
+<span class="nc" id="L159">        }</span>
+
+    }
+
+    /**
+     * ThreadFactory for the worker thread pool. We don't use the default
+     * thread factory because (1) we want to give the worker threads easier
+     * to identify names; and (2) we want to make the worker threads daemon
+     * threads so they don't block the server from shutting down.
+     */
+    private static class DaemonThreadFactory implements ThreadFactory {
+
+        final ThreadGroup group;
+<span class="nc" id="L172">        final AtomicInteger threadNumber = new AtomicInteger(1);</span>
+        final String namePrefix;
+
+        DaemonThreadFactory(String name) {
+<span class="nc" id="L176">            this(name, 1);</span>
+<span class="nc" id="L177">        }</span>
+
+<span class="nc" id="L179">        DaemonThreadFactory(String name, int firstThreadNum) {</span>
+<span class="nc" id="L180">            threadNumber.set(firstThreadNum);</span>
+<span class="nc" id="L181">            SecurityManager s = System.getSecurityManager();</span>
+<span class="nc bnc" id="L182" title="All 2 branches missed.">            group = (s != null) ? s.getThreadGroup() : Thread.currentThread().getThreadGroup();</span>
+<span class="nc" id="L183">            namePrefix = name + &quot;-&quot;;</span>
+<span class="nc" id="L184">        }</span>
+
+        public Thread newThread(Runnable r) {
+<span class="nc" id="L187">            Thread t = new Thread(group, r, namePrefix + threadNumber.getAndIncrement(), 0);</span>
+<span class="nc bnc" id="L188" title="All 2 branches missed.">            if (!t.isDaemon()) {</span>
+<span class="nc" id="L189">                t.setDaemon(true);</span>
+            }
+<span class="nc bnc" id="L191" title="All 2 branches missed.">            if (t.getPriority() != Thread.NORM_PRIORITY) {</span>
+<span class="nc" id="L192">                t.setPriority(Thread.NORM_PRIORITY);</span>
+            }
+<span class="nc" id="L194">            return t;</span>
+        }
+
+    }
+
+    public void start() {
+<span class="nc bnc" id="L200" title="All 2 branches missed.">        if (numWorkerThreads &gt; 0) {</span>
+<span class="nc bnc" id="L201" title="All 2 branches missed.">            if (threadsAreAssignable) {</span>
+<span class="nc bnc" id="L202" title="All 2 branches missed.">                for (int i = 1; i &lt;= numWorkerThreads; ++i) {</span>
+<span class="nc" id="L203">                    workers.add(Executors.newFixedThreadPool(1, new DaemonThreadFactory(threadNamePrefix, i)));</span>
+                }
+            } else {
+<span class="nc" id="L206">                workers.add(Executors.newFixedThreadPool(numWorkerThreads, new DaemonThreadFactory(threadNamePrefix)));</span>
+            }
+        }
+<span class="nc" id="L209">        stopped = false;</span>
+<span class="nc" id="L210">    }</span>
+
+    public void stop() {
+<span class="nc" id="L213">        stopped = true;</span>
+
+        // Signal for graceful shutdown
+<span class="nc bnc" id="L216" title="All 2 branches missed.">        for (ExecutorService worker : workers) {</span>
+<span class="nc" id="L217">            worker.shutdown();</span>
+<span class="nc" id="L218">        }</span>
+<span class="nc" id="L219">    }</span>
+
+    public void join(long shutdownTimeoutMS) {
+        // Give the worker threads time to finish executing
+<span class="nc" id="L223">        long now = Time.currentElapsedTime();</span>
+<span class="nc" id="L224">        long endTime = now + shutdownTimeoutMS;</span>
+<span class="nc bnc" id="L225" title="All 2 branches missed.">        for (ExecutorService worker : workers) {</span>
+<span class="nc" id="L226">            boolean terminated = false;</span>
+<span class="nc bnc" id="L227" title="All 2 branches missed.">            while ((now = Time.currentElapsedTime()) &lt;= endTime) {</span>
+                try {
+<span class="nc" id="L229">                    terminated = worker.awaitTermination(endTime - now, TimeUnit.MILLISECONDS);</span>
+<span class="nc" id="L230">                    break;</span>
+<span class="nc" id="L231">                } catch (InterruptedException e) {</span>
+                    // ignore
+<span class="nc" id="L233">                }</span>
+            }
+<span class="nc bnc" id="L235" title="All 2 branches missed.">            if (!terminated) {</span>
+                // If we've timed out, do a hard shutdown
+<span class="nc" id="L237">                worker.shutdownNow();</span>
+            }
+<span class="nc" id="L239">        }</span>
+<span class="nc" id="L240">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

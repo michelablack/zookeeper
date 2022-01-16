@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>MultiOperationRecord.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper</a> &gt; <span class="el_source">MultiOperationRecord.java</span></div><h1>MultiOperationRecord.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the &quot;License&quot;); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import org.apache.jute.InputArchive;
+import org.apache.jute.OutputArchive;
+import org.apache.jute.Record;
+import org.apache.zookeeper.proto.CheckVersionRequest;
+import org.apache.zookeeper.proto.CreateRequest;
+import org.apache.zookeeper.proto.CreateTTLRequest;
+import org.apache.zookeeper.proto.DeleteRequest;
+import org.apache.zookeeper.proto.GetChildrenRequest;
+import org.apache.zookeeper.proto.GetDataRequest;
+import org.apache.zookeeper.proto.MultiHeader;
+import org.apache.zookeeper.proto.SetDataRequest;
+
+/**
+ * Encodes a composite operation.  In the wire format, each operation
+ * consists of a single MultiHeader followed by the appropriate request.
+ * Each of these MultiHeaders has a type which indicates
+ * the type of the following operation or a negative number if no more operations
+ * are included.
+ * All of the operations must be from the same OpKind.
+ */
+public class MultiOperationRecord implements Record, Iterable&lt;Op&gt; {
+
+<span class="nc" id="L46">    private List&lt;Op&gt; ops = new ArrayList&lt;Op&gt;();</span>
+<span class="nc" id="L47">    private Op.OpKind opKind = null;</span>
+
+<span class="nc" id="L49">    public MultiOperationRecord() {</span>
+<span class="nc" id="L50">    }</span>
+
+<span class="nc" id="L52">    public MultiOperationRecord(Iterable&lt;Op&gt; ops) throws IllegalArgumentException {</span>
+<span class="nc bnc" id="L53" title="All 2 branches missed.">        for (Op op : ops) {</span>
+<span class="nc" id="L54">            setOrCheckOpKind(op.getKind());</span>
+<span class="nc" id="L55">            add(op);</span>
+<span class="nc" id="L56">        }</span>
+<span class="nc" id="L57">    }</span>
+
+    @Override
+    public Iterator&lt;Op&gt; iterator() {
+<span class="nc" id="L61">        return ops.iterator();</span>
+    }
+
+    public void add(Op op) throws IllegalArgumentException {
+<span class="nc" id="L65">        setOrCheckOpKind(op.getKind());</span>
+<span class="nc" id="L66">        ops.add(op);</span>
+<span class="nc" id="L67">    }</span>
+
+    public int size() {
+<span class="nc" id="L70">        return ops.size();</span>
+    }
+
+    /**
+     * Returns the kind of the operations contained by the record.
+     * @return The OpKind value of all the elements in the record.
+     */
+    public Op.OpKind getOpKind() {
+<span class="nc" id="L78">        return opKind;</span>
+    }
+
+    private void setOrCheckOpKind(Op.OpKind ok) throws IllegalArgumentException {
+<span class="nc bnc" id="L82" title="All 2 branches missed.">        if (opKind == null) {</span>
+<span class="nc" id="L83">            opKind = ok;</span>
+<span class="nc bnc" id="L84" title="All 2 branches missed.">        } else if (ok != opKind) {</span>
+<span class="nc" id="L85">            throw new IllegalArgumentException(&quot;Mixing read and write operations (transactions)&quot;</span>
+                                               + &quot; is not allowed in a multi request.&quot;);
+        }
+<span class="nc" id="L88">    }</span>
+
+    @Override
+    public void serialize(OutputArchive archive, String tag) throws IOException {
+<span class="nc" id="L92">        archive.startRecord(this, tag);</span>
+<span class="nc bnc" id="L93" title="All 2 branches missed.">        for (Op op : ops) {</span>
+<span class="nc" id="L94">            MultiHeader h = new MultiHeader(op.getType(), false, -1);</span>
+<span class="nc" id="L95">            h.serialize(archive, tag);</span>
+<span class="nc bnc" id="L96" title="All 2 branches missed.">            switch (op.getType()) {</span>
+            case ZooDefs.OpCode.create:
+            case ZooDefs.OpCode.create2:
+            case ZooDefs.OpCode.createTTL:
+            case ZooDefs.OpCode.createContainer:
+            case ZooDefs.OpCode.delete:
+            case ZooDefs.OpCode.setData:
+            case ZooDefs.OpCode.check:
+            case ZooDefs.OpCode.getChildren:
+            case ZooDefs.OpCode.getData:
+<span class="nc" id="L106">                op.toRequestRecord().serialize(archive, tag);</span>
+<span class="nc" id="L107">                break;</span>
+            default:
+<span class="nc" id="L109">                throw new IOException(&quot;Invalid type of op&quot;);</span>
+            }
+<span class="nc" id="L111">        }</span>
+<span class="nc" id="L112">        new MultiHeader(-1, true, -1).serialize(archive, tag);</span>
+<span class="nc" id="L113">        archive.endRecord(this, tag);</span>
+<span class="nc" id="L114">    }</span>
+
+    @Override
+    public void deserialize(InputArchive archive, String tag) throws IOException {
+<span class="nc" id="L118">        archive.startRecord(tag);</span>
+<span class="nc" id="L119">        MultiHeader h = new MultiHeader();</span>
+<span class="nc" id="L120">        h.deserialize(archive, tag);</span>
+        try {
+<span class="nc bnc" id="L122" title="All 2 branches missed.">            while (!h.getDone()) {</span>
+<span class="nc bnc" id="L123" title="All 8 branches missed.">                switch (h.getType()) {</span>
+                case ZooDefs.OpCode.create:
+                case ZooDefs.OpCode.create2:
+                case ZooDefs.OpCode.createContainer:
+<span class="nc" id="L127">                    CreateRequest cr = new CreateRequest();</span>
+<span class="nc" id="L128">                    cr.deserialize(archive, tag);</span>
+<span class="nc" id="L129">                    add(Op.create(cr.getPath(), cr.getData(), cr.getAcl(), cr.getFlags()));</span>
+<span class="nc" id="L130">                    break;</span>
+                case ZooDefs.OpCode.createTTL:
+<span class="nc" id="L132">                    CreateTTLRequest crTtl = new CreateTTLRequest();</span>
+<span class="nc" id="L133">                    crTtl.deserialize(archive, tag);</span>
+<span class="nc" id="L134">                    add(Op.create(crTtl.getPath(), crTtl.getData(), crTtl.getAcl(), crTtl.getFlags(), crTtl.getTtl()));</span>
+<span class="nc" id="L135">                    break;</span>
+                case ZooDefs.OpCode.delete:
+<span class="nc" id="L137">                    DeleteRequest dr = new DeleteRequest();</span>
+<span class="nc" id="L138">                    dr.deserialize(archive, tag);</span>
+<span class="nc" id="L139">                    add(Op.delete(dr.getPath(), dr.getVersion()));</span>
+<span class="nc" id="L140">                    break;</span>
+                case ZooDefs.OpCode.setData:
+<span class="nc" id="L142">                    SetDataRequest sdr = new SetDataRequest();</span>
+<span class="nc" id="L143">                    sdr.deserialize(archive, tag);</span>
+<span class="nc" id="L144">                    add(Op.setData(sdr.getPath(), sdr.getData(), sdr.getVersion()));</span>
+<span class="nc" id="L145">                    break;</span>
+                case ZooDefs.OpCode.check:
+<span class="nc" id="L147">                    CheckVersionRequest cvr = new CheckVersionRequest();</span>
+<span class="nc" id="L148">                    cvr.deserialize(archive, tag);</span>
+<span class="nc" id="L149">                    add(Op.check(cvr.getPath(), cvr.getVersion()));</span>
+<span class="nc" id="L150">                    break;</span>
+                case ZooDefs.OpCode.getChildren:
+<span class="nc" id="L152">                    GetChildrenRequest gcr = new GetChildrenRequest();</span>
+<span class="nc" id="L153">                    gcr.deserialize(archive, tag);</span>
+<span class="nc" id="L154">                    add(Op.getChildren(gcr.getPath()));</span>
+<span class="nc" id="L155">                    break;</span>
+                case ZooDefs.OpCode.getData:
+<span class="nc" id="L157">                    GetDataRequest gdr = new GetDataRequest();</span>
+<span class="nc" id="L158">                    gdr.deserialize(archive, tag);</span>
+<span class="nc" id="L159">                    add(Op.getData(gdr.getPath()));</span>
+<span class="nc" id="L160">                    break;</span>
+                default:
+<span class="nc" id="L162">                    throw new IOException(&quot;Invalid type of op&quot;);</span>
+                }
+<span class="nc" id="L164">                h.deserialize(archive, tag);</span>
+            }
+<span class="nc" id="L166">        } catch (IllegalArgumentException e) {</span>
+<span class="nc" id="L167">            throw new IOException(&quot;Mixing different kind of ops&quot;);</span>
+<span class="nc" id="L168">        }</span>
+<span class="nc" id="L169">        archive.endRecord(tag);</span>
+<span class="nc" id="L170">    }</span>
+
+    @Override
+    public boolean equals(Object o) {
+<span class="nc bnc" id="L174" title="All 2 branches missed.">        if (this == o) {</span>
+<span class="nc" id="L175">            return true;</span>
+        }
+<span class="nc bnc" id="L177" title="All 2 branches missed.">        if (!(o instanceof MultiOperationRecord)) {</span>
+<span class="nc" id="L178">            return false;</span>
+        }
+
+<span class="nc" id="L181">        MultiOperationRecord that = (MultiOperationRecord) o;</span>
+
+<span class="nc bnc" id="L183" title="All 2 branches missed.">        if (ops != null) {</span>
+<span class="nc" id="L184">            Iterator&lt;Op&gt; other = that.ops.iterator();</span>
+<span class="nc bnc" id="L185" title="All 2 branches missed.">            for (Op op : ops) {</span>
+<span class="nc" id="L186">                boolean hasMoreData = other.hasNext();</span>
+<span class="nc bnc" id="L187" title="All 2 branches missed.">                if (!hasMoreData) {</span>
+<span class="nc" id="L188">                    return false;</span>
+                }
+<span class="nc" id="L190">                Op otherOp = other.next();</span>
+<span class="nc bnc" id="L191" title="All 2 branches missed.">                if (!op.equals(otherOp)) {</span>
+<span class="nc" id="L192">                    return false;</span>
+                }
+<span class="nc" id="L194">            }</span>
+<span class="nc bnc" id="L195" title="All 2 branches missed.">            return !other.hasNext();</span>
+        } else {
+<span class="nc bnc" id="L197" title="All 2 branches missed.">            return that.ops == null;</span>
+        }
+
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L204">        int h = 1023;</span>
+<span class="nc bnc" id="L205" title="All 2 branches missed.">        for (Op op : ops) {</span>
+<span class="nc" id="L206">            h = h * 25 + op.hashCode();</span>
+<span class="nc" id="L207">        }</span>
+<span class="nc" id="L208">        return h;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

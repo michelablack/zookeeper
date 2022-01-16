@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LogChopper.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.util</a> &gt; <span class="el_source">LogChopper.java</span></div><h1>LogChopper.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.util;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.EOFException;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.zip.Adler32;
+import java.util.zip.Checksum;
+import org.apache.jute.BinaryInputArchive;
+import org.apache.jute.BinaryOutputArchive;
+import org.apache.jute.Record;
+import org.apache.yetus.audience.InterfaceAudience;
+import org.apache.zookeeper.server.ExitCode;
+import org.apache.zookeeper.server.TxnLogEntry;
+import org.apache.zookeeper.server.persistence.FileHeader;
+import org.apache.zookeeper.server.persistence.FileTxnLog;
+import org.apache.zookeeper.txn.TxnHeader;
+import org.apache.zookeeper.util.ServiceUtils;
+
+/**
+ * this class will chop the log at the specified zxid
+ */
+@InterfaceAudience.Public
+<span class="nc" id="L46">public class LogChopper {</span>
+
+    public static void main(String[] args) {
+<span class="nc" id="L49">        ExitCode rc = ExitCode.INVALID_INVOCATION;</span>
+<span class="nc bnc" id="L50" title="All 2 branches missed.">        if (args.length != 3) {</span>
+<span class="nc" id="L51">            System.out.println(&quot;Usage: LogChopper zxid_to_chop_to txn_log_to_chop chopped_filename&quot;);</span>
+<span class="nc" id="L52">            System.out.println(&quot;    this program will read the txn_log_to_chop file and copy all the transactions&quot;);</span>
+<span class="nc" id="L53">            System.out.println(&quot;    from it up to (and including) the given zxid into chopped_filename.&quot;);</span>
+<span class="nc" id="L54">            ServiceUtils.requestSystemExit(rc.getValue());</span>
+        }
+<span class="nc" id="L56">        String txnLog = args[1];</span>
+<span class="nc" id="L57">        String choppedLog = args[2];</span>
+
+<span class="nc" id="L59">        try (InputStream is = new BufferedInputStream(new FileInputStream(txnLog)); OutputStream os = new BufferedOutputStream(new FileOutputStream(choppedLog))) {</span>
+<span class="nc" id="L60">            long zxid = Long.decode(args[0]);</span>
+
+<span class="nc bnc" id="L62" title="All 2 branches missed.">            if (chop(is, os, zxid)) {</span>
+<span class="nc" id="L63">                rc = ExitCode.EXECUTION_FINISHED;</span>
+            }
+<span class="nc" id="L65">        } catch (Exception e) {</span>
+<span class="nc" id="L66">            System.out.println(&quot;Got exception: &quot; + e.getMessage());</span>
+<span class="nc" id="L67">        }</span>
+<span class="nc" id="L68">        ServiceUtils.requestSystemExit(rc.getValue());</span>
+<span class="nc" id="L69">    }</span>
+
+    public static boolean chop(InputStream is, OutputStream os, long zxid) throws IOException {
+<span class="nc" id="L72">        BinaryInputArchive logStream = BinaryInputArchive.getArchive(is);</span>
+<span class="nc" id="L73">        BinaryOutputArchive choppedStream = BinaryOutputArchive.getArchive(os);</span>
+<span class="nc" id="L74">        FileHeader fhdr = new FileHeader();</span>
+<span class="nc" id="L75">        fhdr.deserialize(logStream, &quot;fileheader&quot;);</span>
+
+<span class="nc bnc" id="L77" title="All 2 branches missed.">        if (fhdr.getMagic() != FileTxnLog.TXNLOG_MAGIC) {</span>
+<span class="nc" id="L78">            System.err.println(&quot;Invalid magic number in txn log file&quot;);</span>
+<span class="nc" id="L79">            return false;</span>
+        }
+<span class="nc" id="L81">        System.out.println(&quot;ZooKeeper Transactional Log File with dbid &quot;</span>
+<span class="nc" id="L82">                           + fhdr.getDbid()</span>
+                           + &quot; txnlog format version &quot;
+<span class="nc" id="L84">                           + fhdr.getVersion());</span>
+
+<span class="nc" id="L86">        fhdr.serialize(choppedStream, &quot;fileheader&quot;);</span>
+<span class="nc" id="L87">        int count = 0;</span>
+<span class="nc" id="L88">        boolean hasZxid = false;</span>
+<span class="nc" id="L89">        long previousZxid = -1;</span>
+        while (true) {
+            long crcValue;
+            byte[] bytes;
+            try {
+<span class="nc" id="L94">                crcValue = logStream.readLong(&quot;crcvalue&quot;);</span>
+
+<span class="nc" id="L96">                bytes = logStream.readBuffer(&quot;txnEntry&quot;);</span>
+<span class="nc" id="L97">            } catch (EOFException e) {</span>
+<span class="nc" id="L98">                System.out.println(&quot;EOF reached after &quot; + count + &quot; txns.&quot;);</span>
+                // returning false because nothing was chopped
+<span class="nc" id="L100">                return false;</span>
+<span class="nc" id="L101">            }</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">            if (bytes.length == 0) {</span>
+                // Since we preallocate, we define EOF to be an
+                // empty transaction
+<span class="nc" id="L105">                System.out.println(&quot;EOF reached after &quot; + count + &quot; txns.&quot;);</span>
+                // returning false because nothing was chopped
+<span class="nc" id="L107">                return false;</span>
+            }
+
+<span class="nc" id="L110">            Checksum crc = new Adler32();</span>
+<span class="nc" id="L111">            crc.update(bytes, 0, bytes.length);</span>
+<span class="nc bnc" id="L112" title="All 2 branches missed.">            if (crcValue != crc.getValue()) {</span>
+<span class="nc" id="L113">                throw new IOException(&quot;CRC doesn't match &quot; + crcValue + &quot; vs &quot; + crc.getValue());</span>
+            }
+<span class="nc" id="L115">            TxnLogEntry entry = SerializeUtils.deserializeTxn(bytes);</span>
+<span class="nc" id="L116">            TxnHeader hdr = entry.getHeader();</span>
+<span class="nc" id="L117">            Record txn = entry.getTxn();</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">            if (logStream.readByte(&quot;EOR&quot;) != 'B') {</span>
+<span class="nc" id="L119">                System.out.println(&quot;Last transaction was partial.&quot;);</span>
+<span class="nc" id="L120">                throw new EOFException(&quot;Last transaction was partial.&quot;);</span>
+            }
+
+<span class="nc" id="L123">            final long txnZxid = hdr.getZxid();</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">            if (txnZxid == zxid) {</span>
+<span class="nc" id="L125">                hasZxid = true;</span>
+            }
+
+            // logging the gap to make the inconsistency investigation easier
+<span class="nc bnc" id="L129" title="All 4 branches missed.">            if (previousZxid != -1 &amp;&amp; txnZxid != previousZxid + 1) {</span>
+<span class="nc" id="L130">                long txnEpoch = ZxidUtils.getEpochFromZxid(txnZxid);</span>
+<span class="nc" id="L131">                long txnCounter = ZxidUtils.getCounterFromZxid(txnZxid);</span>
+<span class="nc" id="L132">                long previousEpoch = ZxidUtils.getEpochFromZxid(previousZxid);</span>
+<span class="nc bnc" id="L133" title="All 2 branches missed.">                if (txnEpoch == previousEpoch) {</span>
+<span class="nc" id="L134">                    System.out.println(String.format(&quot;There is intra-epoch gap between %x and %x&quot;, previousZxid, txnZxid));</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">                } else if (txnCounter != 1) {</span>
+<span class="nc" id="L136">                    System.out.println(String.format(&quot;There is inter-epoch gap between %x and %x&quot;, previousZxid, txnZxid));</span>
+                }
+            }
+<span class="nc" id="L139">            previousZxid = txnZxid;</span>
+
+<span class="nc bnc" id="L141" title="All 2 branches missed.">            if (txnZxid &gt; zxid) {</span>
+<span class="nc bnc" id="L142" title="All 4 branches missed.">                if (count == 0 || !hasZxid) {</span>
+<span class="nc" id="L143">                    System.out.println(String.format(&quot;This log does not contain zxid %x&quot;, zxid));</span>
+<span class="nc" id="L144">                    return false;</span>
+                }
+<span class="nc" id="L146">                System.out.println(String.format(&quot;Chopping at %x new log has %d records&quot;, zxid, count));</span>
+<span class="nc" id="L147">                return true;</span>
+            }
+
+<span class="nc" id="L150">            choppedStream.writeLong(crcValue, &quot;crcvalue&quot;);</span>
+<span class="nc" id="L151">            choppedStream.writeBuffer(bytes, &quot;txnEntry&quot;);</span>
+<span class="nc" id="L152">            choppedStream.writeByte((byte) 'B', &quot;EOR&quot;);</span>
+
+<span class="nc" id="L154">            count++;</span>
+<span class="nc" id="L155">        }</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

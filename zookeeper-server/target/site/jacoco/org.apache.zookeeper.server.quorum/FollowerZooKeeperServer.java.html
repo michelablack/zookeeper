@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FollowerZooKeeperServer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum</a> &gt; <span class="el_source">FollowerZooKeeperServer.java</span></div><h1>FollowerZooKeeperServer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum;
+
+import java.io.IOException;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import javax.management.JMException;
+import org.apache.jute.Record;
+import org.apache.zookeeper.jmx.MBeanRegistry;
+import org.apache.zookeeper.metrics.MetricsContext;
+import org.apache.zookeeper.server.ExitCode;
+import org.apache.zookeeper.server.FinalRequestProcessor;
+import org.apache.zookeeper.server.Request;
+import org.apache.zookeeper.server.RequestProcessor;
+import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.SyncRequestProcessor;
+import org.apache.zookeeper.server.ZKDatabase;
+import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
+import org.apache.zookeeper.txn.TxnDigest;
+import org.apache.zookeeper.txn.TxnHeader;
+import org.apache.zookeeper.util.ServiceUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Just like the standard ZooKeeperServer. We just replace the request
+ * processors: FollowerRequestProcessor -&amp;gt; CommitProcessor -&amp;gt;
+ * FinalRequestProcessor
+ *
+ * A SyncRequestProcessor is also spawned off to log proposals from the leader.
+ */
+public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
+
+<span class="nc" id="L51">    private static final Logger LOG = LoggerFactory.getLogger(FollowerZooKeeperServer.class);</span>
+
+    /*
+     * Pending sync requests
+     */ ConcurrentLinkedQueue&lt;Request&gt; pendingSyncs;
+
+    /**
+     * @throws IOException
+     */
+    FollowerZooKeeperServer(FileTxnSnapLog logFactory, QuorumPeer self, ZKDatabase zkDb) throws IOException {
+<span class="nc" id="L61">        super(logFactory, self.tickTime, self.minSessionTimeout, self.maxSessionTimeout, self.clientPortListenBacklog, zkDb, self);</span>
+<span class="nc" id="L62">        this.pendingSyncs = new ConcurrentLinkedQueue&lt;Request&gt;();</span>
+<span class="nc" id="L63">    }</span>
+
+    public Follower getFollower() {
+<span class="nc" id="L66">        return self.follower;</span>
+    }
+
+    @Override
+    protected void setupRequestProcessors() {
+<span class="nc" id="L71">        RequestProcessor finalProcessor = new FinalRequestProcessor(this);</span>
+<span class="nc" id="L72">        commitProcessor = new CommitProcessor(finalProcessor, Long.toString(getServerId()), true, getZooKeeperServerListener());</span>
+<span class="nc" id="L73">        commitProcessor.start();</span>
+<span class="nc" id="L74">        firstProcessor = new FollowerRequestProcessor(this, commitProcessor);</span>
+<span class="nc" id="L75">        ((FollowerRequestProcessor) firstProcessor).start();</span>
+<span class="nc" id="L76">        syncProcessor = new SyncRequestProcessor(this, new SendAckRequestProcessor(getFollower()));</span>
+<span class="nc" id="L77">        syncProcessor.start();</span>
+<span class="nc" id="L78">    }</span>
+
+<span class="nc" id="L80">    LinkedBlockingQueue&lt;Request&gt; pendingTxns = new LinkedBlockingQueue&lt;Request&gt;();</span>
+
+    public void logRequest(TxnHeader hdr, Record txn, TxnDigest digest) {
+<span class="nc" id="L83">        Request request = new Request(hdr.getClientId(), hdr.getCxid(), hdr.getType(), hdr, txn, hdr.getZxid());</span>
+<span class="nc" id="L84">        request.setTxnDigest(digest);</span>
+<span class="nc bnc" id="L85" title="All 2 branches missed.">        if ((request.zxid &amp; 0xffffffffL) != 0) {</span>
+<span class="nc" id="L86">            pendingTxns.add(request);</span>
+        }
+<span class="nc" id="L88">        syncProcessor.processRequest(request);</span>
+<span class="nc" id="L89">    }</span>
+
+    /**
+     * When a COMMIT message is received, eventually this method is called,
+     * which matches up the zxid from the COMMIT with (hopefully) the head of
+     * the pendingTxns queue and hands it to the commitProcessor to commit.
+     * @param zxid - must correspond to the head of pendingTxns if it exists
+     */
+    public void commit(long zxid) {
+<span class="nc bnc" id="L98" title="All 2 branches missed.">        if (pendingTxns.size() == 0) {</span>
+<span class="nc" id="L99">            LOG.warn(&quot;Committing &quot; + Long.toHexString(zxid) + &quot; without seeing txn&quot;);</span>
+<span class="nc" id="L100">            return;</span>
+        }
+<span class="nc" id="L102">        long firstElementZxid = pendingTxns.element().zxid;</span>
+<span class="nc bnc" id="L103" title="All 2 branches missed.">        if (firstElementZxid != zxid) {</span>
+<span class="nc" id="L104">            LOG.error(&quot;Committing zxid 0x&quot; + Long.toHexString(zxid)</span>
+<span class="nc" id="L105">                      + &quot; but next pending txn 0x&quot; + Long.toHexString(firstElementZxid));</span>
+<span class="nc" id="L106">            ServiceUtils.requestSystemExit(ExitCode.UNMATCHED_TXN_COMMIT.getValue());</span>
+        }
+<span class="nc" id="L108">        Request request = pendingTxns.remove();</span>
+<span class="nc" id="L109">        request.logLatency(ServerMetrics.getMetrics().COMMIT_PROPAGATION_LATENCY);</span>
+<span class="nc" id="L110">        commitProcessor.commit(request);</span>
+<span class="nc" id="L111">    }</span>
+
+    public synchronized void sync() {
+<span class="nc bnc" id="L114" title="All 2 branches missed.">        if (pendingSyncs.size() == 0) {</span>
+<span class="nc" id="L115">            LOG.warn(&quot;Not expecting a sync.&quot;);</span>
+<span class="nc" id="L116">            return;</span>
+        }
+
+<span class="nc" id="L119">        Request r = pendingSyncs.remove();</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">        if (r instanceof LearnerSyncRequest) {</span>
+<span class="nc" id="L121">            LearnerSyncRequest lsr = (LearnerSyncRequest) r;</span>
+<span class="nc" id="L122">            lsr.fh.queuePacket(new QuorumPacket(Leader.SYNC, 0, null, null));</span>
+        }
+<span class="nc" id="L124">        commitProcessor.commit(r);</span>
+<span class="nc" id="L125">    }</span>
+
+    @Override
+    public int getGlobalOutstandingLimit() {
+<span class="nc bnc" id="L129" title="All 2 branches missed.">        int divisor = self.getQuorumSize() &gt; 2 ? self.getQuorumSize() - 1 : 1;</span>
+<span class="nc" id="L130">        int globalOutstandingLimit = super.getGlobalOutstandingLimit() / divisor;</span>
+<span class="nc" id="L131">        return globalOutstandingLimit;</span>
+    }
+
+    @Override
+    public String getState() {
+<span class="nc" id="L136">        return &quot;follower&quot;;</span>
+    }
+
+    @Override
+    public Learner getLearner() {
+<span class="nc" id="L141">        return getFollower();</span>
+    }
+
+    /**
+     * Process a request received from external Learner through the LearnerMaster
+     * These requests have already passed through validation and checks for
+     * session upgrade and can be injected into the middle of the pipeline.
+     *
+     * @param request received from external Learner
+     */
+    void processObserverRequest(Request request) {
+<span class="nc" id="L152">        ((FollowerRequestProcessor) firstProcessor).processRequest(request, false);</span>
+<span class="nc" id="L153">    }</span>
+
+    boolean registerJMX(LearnerHandlerBean handlerBean) {
+        try {
+<span class="nc" id="L157">            MBeanRegistry.getInstance().register(handlerBean, jmxServerBean);</span>
+<span class="nc" id="L158">            return true;</span>
+<span class="nc" id="L159">        } catch (JMException e) {</span>
+<span class="nc" id="L160">            LOG.warn(&quot;Could not register connection&quot;, e);</span>
+        }
+<span class="nc" id="L162">        return false;</span>
+    }
+
+    @Override
+    protected void registerMetrics() {
+<span class="nc" id="L167">        super.registerMetrics();</span>
+
+<span class="nc" id="L169">        MetricsContext rootContext = ServerMetrics.getMetrics().getMetricsProvider().getRootContext();</span>
+
+<span class="nc" id="L171">        rootContext.registerGauge(&quot;synced_observers&quot;, self::getSynced_observers_metric);</span>
+
+<span class="nc" id="L173">    }</span>
+
+    @Override
+    protected void unregisterMetrics() {
+<span class="nc" id="L177">        super.unregisterMetrics();</span>
+
+<span class="nc" id="L179">        MetricsContext rootContext = ServerMetrics.getMetrics().getMetricsProvider().getRootContext();</span>
+<span class="nc" id="L180">        rootContext.unregisterGauge(&quot;synced_observers&quot;);</span>
+
+<span class="nc" id="L182">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

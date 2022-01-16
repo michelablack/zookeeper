@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ControlCommand.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.controller</a> &gt; <span class="el_source">ControlCommand.java</span></div><h1>ControlCommand.java</h1><pre class="source lang-java linenums">/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.controller;
+
+/**
+ * Set of commands that this controller can execute. Commands are comprised
+ * of an action and an optional parameter specific to that action.
+ */
+public class ControlCommand {
+    /**
+     * Actions available to the controller
+      */
+<span class="nc" id="L29">    public enum Action {</span>
+        // Simple &quot;are you there&quot; ping to confirm the controller is up and running.
+<span class="nc" id="L31">        PING,</span>
+        // Shutdown everything, including CommandListener, ControllerService, Controller and the ZooKeeperServer.
+<span class="nc" id="L33">        SHUTDOWN,</span>
+        // Close a connection triggering a client disconnect (and then reconnect attempt).
+        // No parameter indicates close all connections. Optional parameter indicates a specific session id (as long).
+<span class="nc" id="L36">        CLOSECONNECTION,</span>
+        // More actions go here in the future (force drop sessions, etc).
+<span class="nc" id="L38">        EXPIRESESSION,</span>
+        // Reject all future connections. No parameter required.
+<span class="nc" id="L40">        REJECTCONNECTIONS,</span>
+        // Add latency to server replies.
+        // Optional parameter indicates time in milliseconds to delay
+        // (default = 1 second).
+<span class="nc" id="L44">        ADDDELAY,</span>
+        // Fail requests.
+        // Optional parameter indicates how many requests to fail.
+        // (default = all requests until RESET).
+<span class="nc" id="L48">        FAILREQUESTS,</span>
+        // Process requests but do not send a response.
+        // Optional parameter indicates how many requests to fail.
+        // (default = all requests until RESET).
+<span class="nc" id="L52">        NORESPONSE,</span>
+        // No parameter indicates fail all requests.
+        // Optional parameter indicates undo all the chaotic action commands
+        // (reject connections, add delay, fail requests, eat requests and so on...).
+<span class="nc" id="L56">        RESET,</span>
+        // Force the quorum to elect a new leader.
+<span class="nc" id="L58">        ELECTNEWLEADER,</span>
+        // More actions go here in the future...
+    }
+
+    public static final String ENDPOINT = &quot;command&quot;;
+    public static final String ENDPOINT_PREFIX = ENDPOINT + &quot;/&quot;;
+
+    private Action action;
+    public Action getAction() {
+<span class="nc" id="L67">        return action;</span>
+    }
+
+    private String parameter;
+    protected String getParameter() {
+<span class="nc" id="L72">        return parameter;</span>
+    }
+
+    public ControlCommand(Action action) {
+<span class="nc" id="L76">        this(action, null);</span>
+<span class="nc" id="L77">    }</span>
+
+<span class="nc" id="L79">    public ControlCommand(Action action, String param) {</span>
+<span class="nc" id="L80">        this.action = action;</span>
+<span class="nc" id="L81">        this.parameter = param;</span>
+<span class="nc" id="L82">    }</span>
+
+    /**
+     * Create a REST command uri.
+     * @param action The 'verb' of the command.
+     * @param parameter The optional parameter.
+     * @return A string to send to the server as the end of the Uri.
+     */
+    public static String createCommandUri(Action action, String parameter) {
+<span class="nc bnc" id="L91" title="All 4 branches missed.">        return ENDPOINT_PREFIX + action.toString() + (parameter != null &amp;&amp; !parameter.isEmpty() ? &quot;/&quot; + parameter : &quot;&quot;);</span>
+    }
+
+    /**
+     * Parse a Uri into the required Command action and parameter.
+     * @param commandUri the properly formatted Uri.
+     */
+    public static ControlCommand parseUri(String commandUri) {
+<span class="nc bnc" id="L99" title="All 2 branches missed.">        if (commandUri == null) {</span>
+<span class="nc" id="L100">            throw new IllegalArgumentException(&quot;commandUri can't be null.&quot;);</span>
+        }
+
+<span class="nc bnc" id="L103" title="All 2 branches missed.">        if (!commandUri.startsWith(ENDPOINT_PREFIX)) {</span>
+<span class="nc" id="L104">            throw new IllegalArgumentException(&quot;Missing required prefix: &quot; + ENDPOINT_PREFIX);</span>
+        }
+
+<span class="nc" id="L107">        String uri = commandUri.substring(ENDPOINT_PREFIX.length());</span>
+        String name;
+        String param;
+
+<span class="nc" id="L111">        int separatorIndex = uri.indexOf('/');</span>
+<span class="nc bnc" id="L112" title="All 2 branches missed.">        if (separatorIndex &lt; 0) {</span>
+<span class="nc" id="L113">            name = uri;</span>
+<span class="nc" id="L114">            param = null;</span>
+        } else {
+<span class="nc" id="L116">            name = uri.substring(0, separatorIndex);</span>
+<span class="nc" id="L117">            param = uri.substring(separatorIndex + 1);</span>
+        }
+
+<span class="nc" id="L120">        return new ControlCommand(Action.valueOf(name.toUpperCase()), param);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

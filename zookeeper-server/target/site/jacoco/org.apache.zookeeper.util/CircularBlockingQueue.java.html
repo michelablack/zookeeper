@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CircularBlockingQueue.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.util</a> &gt; <span class="el_source">CircularBlockingQueue.java</span></div><h1>CircularBlockingQueue.java</h1><pre class="source lang-java linenums">/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.util;
+
+import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * A bounded blocking queue backed by an array. This queue orders elements FIFO
+ * (first-in-first-out). The head of the queue is that element that has been on
+ * the queue the longest time. The tail of the queue is that element that has
+ * been on the queue the shortest time. New elements are inserted at the tail of
+ * the queue, and the queue retrieval operations obtain elements at the head of
+ * the queue. If the queue is full, the head of the queue (the oldest element)
+ * will be removed to make room for the newest element.
+ */
+public class CircularBlockingQueue&lt;E&gt; implements BlockingQueue&lt;E&gt; {
+
+<span class="nc" id="L43">  private static final Logger LOG = LoggerFactory.getLogger(CircularBlockingQueue.class);</span>
+
+  /** Main lock guarding all access */
+  private final ReentrantLock lock;
+
+  /** Condition for waiting takes */
+  private final Condition notEmpty;
+
+  /** The array-backed queue */
+  private final ArrayDeque&lt;E&gt; queue;
+
+  private final int maxSize;
+
+  private long droppedCount;
+
+<span class="nc" id="L58">  public CircularBlockingQueue(int queueSize) {</span>
+<span class="nc" id="L59">    this.queue = new ArrayDeque&lt;&gt;(queueSize);</span>
+<span class="nc" id="L60">    this.maxSize = queueSize;</span>
+
+<span class="nc" id="L62">    this.lock =  new ReentrantLock();</span>
+<span class="nc" id="L63">    this.notEmpty = this.lock.newCondition();</span>
+<span class="nc" id="L64">    this.droppedCount = 0L;</span>
+<span class="nc" id="L65">  }</span>
+
+  /**
+   * This method differs from {@link BlockingQueue#offer(Object)} in that it
+   * will remove the oldest queued element (the element at the front of the
+   * queue) in order to make room for any new elements if the queue is full.
+   *
+   * @param e the element to add
+   * @return true since it will make room for any new elements if required
+   */
+  @Override
+  public boolean offer(E e) {
+<span class="nc" id="L77">      Objects.requireNonNull(e);</span>
+<span class="nc" id="L78">      final ReentrantLock lock = this.lock;</span>
+<span class="nc" id="L79">      lock.lock();</span>
+      try {
+<span class="nc bnc" id="L81" title="All 2 branches missed.">          if (this.queue.size() == this.maxSize) {</span>
+<span class="nc" id="L82">              final E discard = this.queue.remove();</span>
+<span class="nc" id="L83">              this.droppedCount++;</span>
+<span class="nc" id="L84">              LOG.debug(&quot;Queue is full. Discarding oldest element [count={}]: {}&quot;,</span>
+<span class="nc" id="L85">                  this.droppedCount, discard);</span>
+          }
+<span class="nc" id="L87">          this.queue.add(e);</span>
+<span class="nc" id="L88">          this.notEmpty.signal();</span>
+      } finally {
+<span class="nc" id="L90">          lock.unlock();</span>
+      }
+<span class="nc" id="L92">      return true;</span>
+  }
+
+  @Override
+  public E poll(long timeout, TimeUnit unit) throws InterruptedException {
+<span class="nc" id="L97">      long nanos = unit.toNanos(timeout);</span>
+<span class="nc" id="L98">      final ReentrantLock lock = this.lock;</span>
+<span class="nc" id="L99">      lock.lockInterruptibly();</span>
+      try {
+<span class="nc bnc" id="L101" title="All 2 branches missed.">          while (this.queue.isEmpty()) {</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">              if (nanos &lt;= 0) {</span>
+<span class="nc" id="L103">                  return null;</span>
+              }
+<span class="nc" id="L105">              nanos = this.notEmpty.awaitNanos(nanos);</span>
+          }
+<span class="nc" id="L107">          return this.queue.poll();</span>
+      } finally {
+<span class="nc" id="L109">          lock.unlock();</span>
+      }
+  }
+
+  @Override
+  public E take() throws InterruptedException {
+<span class="nc" id="L115">      final ReentrantLock lock = this.lock;</span>
+<span class="nc" id="L116">      lock.lockInterruptibly();</span>
+      try {
+<span class="nc bnc" id="L118" title="All 2 branches missed.">          while (this.queue.isEmpty()) {</span>
+<span class="nc" id="L119">            this.notEmpty.await();</span>
+          }
+<span class="nc" id="L121">          return this.queue.poll();</span>
+      } finally {
+<span class="nc" id="L123">          lock.unlock();</span>
+      }
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="nc" id="L129">    final ReentrantLock lock = this.lock;</span>
+<span class="nc" id="L130">    lock.lock();</span>
+    try {
+<span class="nc" id="L132">      return this.queue.isEmpty();</span>
+    } finally {
+<span class="nc" id="L134">      lock.unlock();</span>
+    }
+  }
+
+  @Override
+  public int size() {
+<span class="nc" id="L140">    final ReentrantLock lock = this.lock;</span>
+<span class="nc" id="L141">    lock.lock();</span>
+    try {
+<span class="nc" id="L143">      return this.queue.size();</span>
+    } finally {
+<span class="nc" id="L145">      lock.unlock();</span>
+    }
+  }
+
+  /**
+   * Returns the number of elements that were dropped from the queue because the
+   * queue was full when a new element was offered.
+   *
+   * @return The number of elements dropped (lost) from the queue
+   */
+  public long getDroppedCount() {
+<span class="nc" id="L156">    return this.droppedCount;</span>
+  }
+
+  /**
+   * For testing purposes only.
+   *
+   * @return True if a thread is blocked waiting for a new element to be offered
+   *         to the queue
+   */
+  boolean isConsumerThreadBlocked() {
+<span class="nc" id="L166">    final ReentrantLock lock = this.lock;</span>
+<span class="nc" id="L167">    lock.lock();</span>
+    try {
+<span class="nc bnc" id="L169" title="All 2 branches missed.">      return lock.getWaitQueueLength(this.notEmpty) &gt; 0;</span>
+    } finally {
+<span class="nc" id="L171">      lock.unlock();</span>
+    }
+  }
+
+  @Override
+  public int drainTo(Collection&lt;? super E&gt; c) {
+<span class="nc" id="L177">    throw new UnsupportedOperationException();</span>
+  }
+
+
+  @Override
+  public E poll() {
+<span class="nc" id="L183">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public E element() {
+<span class="nc" id="L188">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public E peek() {
+<span class="nc" id="L193">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public E remove() {
+<span class="nc" id="L198">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean addAll(Collection&lt;? extends E&gt; arg0) {
+<span class="nc" id="L203">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public void clear() {
+<span class="nc" id="L208">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean containsAll(Collection&lt;?&gt; arg0) {
+<span class="nc" id="L213">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public Iterator&lt;E&gt; iterator() {
+<span class="nc" id="L218">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean removeAll(Collection&lt;?&gt; arg0) {
+<span class="nc" id="L223">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean retainAll(Collection&lt;?&gt; arg0) {
+<span class="nc" id="L228">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public Object[] toArray() {
+<span class="nc" id="L233">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public &lt;T&gt; T[] toArray(T[] arg0) {
+<span class="nc" id="L238">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean add(E e) {
+<span class="nc" id="L243">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean contains(Object o) {
+<span class="nc" id="L248">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public int drainTo(Collection&lt;? super E&gt; c, int maxElements) {
+<span class="nc" id="L253">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean offer(E e, long timeout, TimeUnit unit)
+      throws InterruptedException {
+<span class="nc" id="L259">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public void put(E e) throws InterruptedException {
+<span class="nc" id="L264">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public int remainingCapacity() {
+<span class="nc" id="L269">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public boolean remove(Object o) {
+<span class="nc" id="L274">    throw new UnsupportedOperationException();</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

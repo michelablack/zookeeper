@@ -1,0 +1,8 @@
+language: java
+addons:
+  sonarcloud:
+    organization: michelablack
+  
+script:
+- mvn clean test jacoco:prepare-agent sonar:sonar
+

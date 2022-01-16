@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DatadirCleanupManager.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">DatadirCleanupManager.java</span></div><h1>DatadirCleanupManager.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import java.io.File;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This class manages the cleanup of snapshots and corresponding transaction
+ * logs by scheduling the auto purge task with the specified
+ * 'autopurge.purgeInterval'. It keeps the most recent
+ * 'autopurge.snapRetainCount' number of snapshots and corresponding transaction
+ * logs.
+ */
+public class DatadirCleanupManager {
+
+<span class="nc" id="L37">    private static final Logger LOG = LoggerFactory.getLogger(DatadirCleanupManager.class);</span>
+
+    /**
+     * Status of the dataDir purge task
+     */
+<span class="nc" id="L42">    public enum PurgeTaskStatus {</span>
+<span class="nc" id="L43">        NOT_STARTED,</span>
+<span class="nc" id="L44">        STARTED,</span>
+<span class="nc" id="L45">        COMPLETED</span>
+    }
+
+<span class="nc" id="L48">    private PurgeTaskStatus purgeTaskStatus = PurgeTaskStatus.NOT_STARTED;</span>
+
+    private final File snapDir;
+
+    private final File dataLogDir;
+
+    private final int snapRetainCount;
+
+    private final int purgeInterval;
+
+    private Timer timer;
+
+    /**
+     * Constructor of DatadirCleanupManager. It takes the parameters to schedule
+     * the purge task.
+     *
+     * @param snapDir
+     *            snapshot directory
+     * @param dataLogDir
+     *            transaction log directory
+     * @param snapRetainCount
+     *            number of snapshots to be retained after purge
+     * @param purgeInterval
+     *            purge interval in hours
+     */
+<span class="nc" id="L73">    public DatadirCleanupManager(File snapDir, File dataLogDir, int snapRetainCount, int purgeInterval) {</span>
+<span class="nc" id="L74">        this.snapDir = snapDir;</span>
+<span class="nc" id="L75">        this.dataLogDir = dataLogDir;</span>
+<span class="nc" id="L76">        this.snapRetainCount = snapRetainCount;</span>
+<span class="nc" id="L77">        this.purgeInterval = purgeInterval;</span>
+<span class="nc" id="L78">        LOG.info(&quot;autopurge.snapRetainCount set to {}&quot;, snapRetainCount);</span>
+<span class="nc" id="L79">        LOG.info(&quot;autopurge.purgeInterval set to {}&quot;, purgeInterval);</span>
+<span class="nc" id="L80">    }</span>
+
+    /**
+     * Validates the purge configuration and schedules the purge task. Purge
+     * task keeps the most recent &lt;code&gt;snapRetainCount&lt;/code&gt; number of
+     * snapshots and deletes the remaining for every &lt;code&gt;purgeInterval&lt;/code&gt;
+     * hour(s).
+     * &lt;p&gt;
+     * &lt;code&gt;purgeInterval&lt;/code&gt; of &lt;code&gt;0&lt;/code&gt; or
+     * &lt;code&gt;negative integer&lt;/code&gt; will not schedule the purge task.
+     * &lt;/p&gt;
+     *
+     * @see PurgeTxnLog#purge(File, File, int)
+     */
+    public void start() {
+<span class="nc bnc" id="L95" title="All 2 branches missed.">        if (PurgeTaskStatus.STARTED == purgeTaskStatus) {</span>
+<span class="nc" id="L96">            LOG.warn(&quot;Purge task is already running.&quot;);</span>
+<span class="nc" id="L97">            return;</span>
+        }
+        // Don't schedule the purge task with zero or negative purge interval.
+<span class="nc bnc" id="L100" title="All 2 branches missed.">        if (purgeInterval &lt;= 0) {</span>
+<span class="nc" id="L101">            LOG.info(&quot;Purge task is not scheduled.&quot;);</span>
+<span class="nc" id="L102">            return;</span>
+        }
+
+<span class="nc" id="L105">        timer = new Timer(&quot;PurgeTask&quot;, true);</span>
+<span class="nc" id="L106">        TimerTask task = new PurgeTask(dataLogDir, snapDir, snapRetainCount);</span>
+<span class="nc" id="L107">        timer.scheduleAtFixedRate(task, 0, TimeUnit.HOURS.toMillis(purgeInterval));</span>
+
+<span class="nc" id="L109">        purgeTaskStatus = PurgeTaskStatus.STARTED;</span>
+<span class="nc" id="L110">    }</span>
+
+    /**
+     * Shutdown the purge task.
+     */
+    public void shutdown() {
+<span class="nc bnc" id="L116" title="All 2 branches missed.">        if (PurgeTaskStatus.STARTED == purgeTaskStatus) {</span>
+<span class="nc" id="L117">            LOG.info(&quot;Shutting down purge task.&quot;);</span>
+<span class="nc" id="L118">            timer.cancel();</span>
+<span class="nc" id="L119">            purgeTaskStatus = PurgeTaskStatus.COMPLETED;</span>
+        } else {
+<span class="nc" id="L121">            LOG.warn(&quot;Purge task not started. Ignoring shutdown!&quot;);</span>
+        }
+<span class="nc" id="L123">    }</span>
+
+    static class PurgeTask extends TimerTask {
+
+        private File logsDir;
+        private File snapsDir;
+        private int snapRetainCount;
+
+<span class="nc" id="L131">        public PurgeTask(File dataDir, File snapDir, int count) {</span>
+<span class="nc" id="L132">            logsDir = dataDir;</span>
+<span class="nc" id="L133">            snapsDir = snapDir;</span>
+<span class="nc" id="L134">            snapRetainCount = count;</span>
+<span class="nc" id="L135">        }</span>
+
+        @Override
+        public void run() {
+<span class="nc" id="L139">            LOG.info(&quot;Purge task started.&quot;);</span>
+            try {
+<span class="nc" id="L141">                PurgeTxnLog.purge(logsDir, snapsDir, snapRetainCount);</span>
+<span class="nc" id="L142">            } catch (Exception e) {</span>
+<span class="nc" id="L143">                LOG.error(&quot;Error occurred while purging.&quot;, e);</span>
+<span class="nc" id="L144">            }</span>
+<span class="nc" id="L145">            LOG.info(&quot;Purge task completed.&quot;);</span>
+<span class="nc" id="L146">        }</span>
+
+    }
+
+    /**
+     * Returns the status of the purge task.
+     *
+     * @return the status of the purge task
+     */
+    public PurgeTaskStatus getPurgeTaskStatus() {
+<span class="nc" id="L156">        return purgeTaskStatus;</span>
+    }
+
+    /**
+     * Returns the snapshot directory.
+     *
+     * @return the snapshot directory.
+     */
+    public File getSnapDir() {
+<span class="nc" id="L165">        return snapDir;</span>
+    }
+
+    /**
+     * Returns transaction log directory.
+     *
+     * @return the transaction log directory.
+     */
+    public File getDataLogDir() {
+<span class="nc" id="L174">        return dataLogDir;</span>
+    }
+
+    /**
+     * Returns purge interval in hours.
+     *
+     * @return the purge interval in hours.
+     */
+    public int getPurgeInterval() {
+<span class="nc" id="L183">        return purgeInterval;</span>
+    }
+
+    /**
+     * Returns the number of snapshots to be retained after purge.
+     *
+     * @return the number of snapshots to be retained after purge.
+     */
+    public int getSnapRetainCount() {
+<span class="nc" id="L192">        return snapRetainCount;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>
