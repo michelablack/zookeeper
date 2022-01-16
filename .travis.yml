@@ -1,8 +1,14 @@
 language: java
+
+notifications:
+ email: false
+
 addons:
   sonarcloud:
-    organization: michelablack
+    organization: "michelablack"
+    token:
+       secure: "M6cFfG+1ZkI4D0+c/YxRT9X6rc1iLja5Q+I3Bwh7CNmdHbKVGsnA0/5ZOWQAl6iAAS9hAh5vNFboxoBSXbX45RyprT7ACh//XIy0RbIsp2U4PDycxMzD/nXDremZ+//TnxFARS4ZQ1B/Nq1MxhwCutwVhSbtLHaQMZ6g7z9NYXdBLrVwFtc4FqwgEMgee5F49SPUj/m7/3BXsvkMxplWCnDw5Xg03os12tOQm4KA8y72tKL64GZdN7v8un8LcQBBHu/yOH4PQSo+5DsmlfvJ/P4bOjmB2O6FAlGAzM1UOm67Rli7PGObb4fEP8foBVHP7nNA0w0+v4auBp7x4ATryiQ9dkyll4n5wiee7ItDnLV9CRG4/X7Da/1nJarNztU1oig4ctK8BMEnC3sOawJG6Xw9g1Xe9D2RauobLQ3G+bszH2VFe4FWWQVlLJu6JiJ4ZxJM4qDfKJ9Mr02s1LxOzkbKopjziGkO66EGYLA31YRYGX+huMuIFT22YR5zvmzJ9TQR5HyOY1wPTn3fxth7QQ8QQVnAnxlD6Ba08lXYHZhDxOlO4BXph2kj4UqkOw8Til9XWkvHmoWFxQ/coFpudLDKdPKyRlZPcwDduEVD3yK6GWl0yTjmukGkJrxgA2ajrD4O9yihaUaPj7g6sKAm0sfp7IBjFYGE6uyiq3rlKIw=" 
 
-script:
-- mvn clean verify sonar:sonar
-
+script:  
+  # the following command line builds the project, runs the tests with coverage and then execute the SonarCloud analysis
+  - mvn clean org.jacoco:jacoco-maven-plugin:prepare-agent verify sonar:sonar -Dsonar.projectKey=michelablack_zookeeper-isw2
