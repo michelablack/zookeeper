@@ -34,7 +34,6 @@ public class NodeTree {
     public static List<String> getChildrenNodesNotOrdered(Node root, List<String> leaves) {
 
         if (root == null) {
-            System.out.println(leaves);
             return leaves;
         }
         if (root.right != null)

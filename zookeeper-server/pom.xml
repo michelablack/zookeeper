@@ -289,32 +289,6 @@
           </execution>
         </executions>
       </plugin>
-
-      <!--
-      <forkCount>${surefire-forkcount}</forkCount>
-      <reuseForks>false</reuseForks>
-      <argLine>-Xmx512m -Dtest.junit.threads=${surefire-forkcount} -Dzookeeper.junit.threadid=${surefire.forkNumber} -javaagent:${org.jmockit:jmockit:jar}</argLine>
-      <basedir>${project.basedir}</basedir>
-      <systemPropertyVariables>
-        <build.test.dir>${project.build.directory}/surefire</build.test.dir>
-        <zookeeper.DigestAuthenticationProvider.superDigest>super:D/InIHSb7yEEbrWz8b9l71RjZJU=</zookeeper.DigestAuthenticationProvider.superDigest>
-      </systemPropertyVariables>
-    </configuration>
-  </plugin>
-
-  <plugin>
-    <groupId>org.apache.maven.plugins</groupId>
-    <artifactId>maven-jar-plugin</artifactId>
-    <executions>
-      <execution>
-        <id>publish-test-jar</id>
-        <goals>
-          <goal>test-jar</goal>
-        </goals>
-      </execution>
-    </executions>
-  </plugin>
-  -->
     </plugins>
   </build>
 

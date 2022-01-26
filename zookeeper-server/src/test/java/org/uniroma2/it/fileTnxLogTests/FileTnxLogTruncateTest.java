@@ -8,7 +8,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.zookeeper.server.DataTree;
 import org.apache.zookeeper.server.persistence.FileTxnLog;
 import org.apache.zookeeper.txn.CreateTxn;
 import org.apache.zookeeper.txn.TxnHeader;
@@ -85,7 +84,7 @@ public class FileTnxLogTruncateTest {
         }
     }
 
-    /**@Test
+    @Test
     public void deleteAndTruncate() {
         try {
             assertTrue(this.txnLog.truncate(this.zxid));
@@ -94,5 +93,5 @@ public class FileTnxLogTruncateTest {
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }*/
+    }
 }

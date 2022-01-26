@@ -69,8 +69,7 @@ public class FileTxnLogAppendTest {
     }
 
 
-    public FileTxnLogAppendTest(TxnHeader header, Record record, TxnDigest digest, boolean reinsert, boolean expectedResult)
-            throws IOException {
+    public FileTxnLogAppendTest(TxnHeader header, Record record, TxnDigest digest, boolean reinsert, boolean expectedResult) {
         this.configure(header, record, digest, reinsert, expectedResult);
     }
 
