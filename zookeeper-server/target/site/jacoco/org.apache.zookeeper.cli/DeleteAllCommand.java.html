@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DeleteAllCommand.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.cli</a> &gt; <span class="el_source">DeleteAllCommand.java</span></div><h1>DeleteAllCommand.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.cli;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.ZKUtil;
+
+/**
+ * deleteAll command for cli
+ */
+public class DeleteAllCommand extends CliCommand {
+
+<span class="nc" id="L34">    private static Options options = new Options();</span>
+    private String[] args;
+    private CommandLine cl;
+
+    static {
+<span class="nc" id="L39">        options.addOption(new Option(&quot;b&quot;, true, &quot;batch size&quot;));</span>
+<span class="nc" id="L40">    }</span>
+
+    public DeleteAllCommand() {
+<span class="nc" id="L43">        this(&quot;deleteall&quot;);</span>
+<span class="nc" id="L44">    }</span>
+
+    public DeleteAllCommand(String cmdStr) {
+<span class="nc" id="L47">        super(cmdStr, &quot;path [-b batch size]&quot;);</span>
+<span class="nc" id="L48">    }</span>
+
+    @Override
+    public CliCommand parse(String[] cmdArgs) throws CliParseException {
+<span class="nc" id="L52">        DefaultParser parser = new DefaultParser();</span>
+        try {
+<span class="nc" id="L54">            cl = parser.parse(options, cmdArgs);</span>
+<span class="nc" id="L55">        } catch (ParseException ex) {</span>
+<span class="nc" id="L56">            throw new CliParseException(ex);</span>
+<span class="nc" id="L57">        }</span>
+<span class="nc" id="L58">        args = cl.getArgs();</span>
+<span class="nc bnc" id="L59" title="All 2 branches missed.">        if (args.length &lt; 2) {</span>
+<span class="nc" id="L60">            throw new CliParseException(getUsageStr());</span>
+        }
+
+<span class="nc" id="L63">        return this;</span>
+    }
+
+    @Override
+    public boolean exec() throws CliException {
+        int batchSize;
+        try {
+<span class="nc bnc" id="L70" title="All 2 branches missed.">            batchSize = cl.hasOption(&quot;b&quot;) ? Integer.parseInt(cl.getOptionValue(&quot;b&quot;)) : 1000;</span>
+<span class="nc" id="L71">        } catch (NumberFormatException e) {</span>
+<span class="nc" id="L72">            throw new MalformedCommandException(&quot;-b argument must be an int value&quot;);</span>
+<span class="nc" id="L73">        }</span>
+
+<span class="nc" id="L75">        String path = args[1];</span>
+        try {
+<span class="nc" id="L77">            boolean success = ZKUtil.deleteRecursive(zk, path, batchSize);</span>
+<span class="nc bnc" id="L78" title="All 2 branches missed.">            if (!success) {</span>
+<span class="nc" id="L79">                err.println(&quot;Failed to delete some node(s) in the subtree!&quot;);</span>
+            }
+<span class="nc" id="L81">        } catch (IllegalArgumentException ex) {</span>
+<span class="nc" id="L82">            throw new MalformedPathException(ex.getMessage());</span>
+<span class="nc" id="L83">        } catch (KeeperException | InterruptedException ex) {</span>
+<span class="nc" id="L84">            throw new CliWrapperException(ex);</span>
+<span class="nc" id="L85">        }</span>
+<span class="nc" id="L86">        return false;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

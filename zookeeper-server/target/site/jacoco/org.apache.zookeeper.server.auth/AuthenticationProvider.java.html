@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AuthenticationProvider.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.auth</a> &gt; <span class="el_source">AuthenticationProvider.java</span></div><h1>AuthenticationProvider.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.auth;
+
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.server.ServerCnxn;
+
+/**
+ * This interface is implemented by authentication providers to add new kinds of
+ * authentication schemes to ZooKeeper.
+ */
+public interface AuthenticationProvider {
+
+    /**
+     * The String used to represent this provider. This will correspond to the
+     * scheme field of an Id.
+     *
+     * @return the scheme of this provider.
+     */
+    String getScheme();
+
+    /**
+     * This method is called when a client passes authentication data for this
+     * scheme. The authData is directly from the authentication packet. The
+     * implementor may attach new ids to the authInfo field of cnxn or may use
+     * cnxn to send packets back to the client.
+     *
+     * @param cnxn
+     *                the cnxn that received the authentication information.
+     * @param authData
+     *                the authentication data received.
+     * @return TODO
+     */
+    KeeperException.Code handleAuthentication(ServerCnxn cnxn, byte[] authData);
+
+    /**
+     * This method is called to see if the given id matches the given id
+     * expression in the ACL. This allows schemes to use application specific
+     * wild cards.
+     *
+     * @param id
+     *                the id to check.
+     * @param aclExpr
+     *                the expression to match ids against.
+     * @return true if the id can be matched by the expression.
+     */
+    boolean matches(String id, String aclExpr);
+
+    /**
+     * This method is used to check if the authentication done by this provider
+     * should be used to identify the creator of a node. Some ids such as hosts
+     * and ip addresses are rather transient and in general don't really
+     * identify a client even though sometimes they do.
+     *
+     * @return true if this provider identifies creators.
+     */
+    boolean isAuthenticated();
+
+    /**
+     * Validates the syntax of an id.
+     *
+     * @param id
+     *                the id to validate.
+     * @return true if id is well formed.
+     */
+    boolean isValid(String id);
+
+    /**
+     * &lt;param&gt;id&lt;/param&gt; represents the authentication info which is set in server connection.
+     * id may contain both user name as well as password.
+     * This method should be implemented to extract the user name.
+     *
+     * @param id authentication info set by client.
+     * @return String user name
+     */
+    default String getUserName(String id) {
+        // Most of the authentication providers id contains only user name.
+<span class="nc" id="L94">        return id;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

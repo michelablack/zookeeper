@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ClientCnxnSocket.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper</a> &gt; <span class="el_source">ClientCnxnSocket.java</span></div><h1>ClientCnxnSocket.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.nio.ByteBuffer;
+import java.text.MessageFormat;
+import java.util.Queue;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.atomic.AtomicLong;
+import org.apache.jute.BinaryInputArchive;
+import org.apache.zookeeper.ClientCnxn.Packet;
+import org.apache.zookeeper.client.ZKClientConfig;
+import org.apache.zookeeper.common.Time;
+import org.apache.zookeeper.common.ZKConfig;
+import org.apache.zookeeper.proto.ConnectResponse;
+import org.apache.zookeeper.server.ByteBufferInputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * A ClientCnxnSocket does the lower level communication with a socket
+ * implementation.
+ *
+ * This code has been moved out of ClientCnxn so that a Netty implementation can
+ * be provided as an alternative to the NIO socket code.
+ *
+ */
+<span class="nc" id="L47">abstract class ClientCnxnSocket {</span>
+
+<span class="nc" id="L49">    private static final Logger LOG = LoggerFactory.getLogger(ClientCnxnSocket.class);</span>
+
+    protected boolean initialized;
+
+    /**
+     * This buffer is only used to read the length of the incoming message.
+     */
+<span class="nc" id="L56">    protected final ByteBuffer lenBuffer = ByteBuffer.allocateDirect(4);</span>
+
+    /**
+     * After the length is read, a new incomingBuffer is allocated in
+     * readLength() to receive the full message.
+     */
+<span class="nc" id="L62">    protected ByteBuffer incomingBuffer = lenBuffer;</span>
+<span class="nc" id="L63">    protected final AtomicLong sentCount = new AtomicLong(0L);</span>
+<span class="nc" id="L64">    protected final AtomicLong recvCount = new AtomicLong(0L);</span>
+    protected long lastHeard;
+    protected long lastSend;
+    protected long now;
+    protected ClientCnxn.SendThread sendThread;
+    protected LinkedBlockingDeque&lt;Packet&gt; outgoingQueue;
+    protected ZKClientConfig clientConfig;
+<span class="nc" id="L71">    private int packetLen = ZKClientConfig.CLIENT_MAX_PACKET_LENGTH_DEFAULT;</span>
+
+    /**
+     * The sessionId is only available here for Log and Exception messages.
+     * Otherwise the socket doesn't need to know it.
+     */
+    protected long sessionId;
+
+    void introduce(ClientCnxn.SendThread sendThread, long sessionId, LinkedBlockingDeque&lt;Packet&gt; outgoingQueue) {
+<span class="nc" id="L80">        this.sendThread = sendThread;</span>
+<span class="nc" id="L81">        this.sessionId = sessionId;</span>
+<span class="nc" id="L82">        this.outgoingQueue = outgoingQueue;</span>
+<span class="nc" id="L83">    }</span>
+
+    void updateNow() {
+<span class="nc" id="L86">        now = Time.currentElapsedTime();</span>
+<span class="nc" id="L87">    }</span>
+
+    int getIdleRecv() {
+<span class="nc" id="L90">        return (int) (now - lastHeard);</span>
+    }
+
+    int getIdleSend() {
+<span class="nc" id="L94">        return (int) (now - lastSend);</span>
+    }
+
+    long getSentCount() {
+<span class="nc" id="L98">        return sentCount.get();</span>
+    }
+
+    long getRecvCount() {
+<span class="nc" id="L102">        return recvCount.get();</span>
+    }
+
+    void updateLastHeard() {
+<span class="nc" id="L106">        this.lastHeard = now;</span>
+<span class="nc" id="L107">    }</span>
+
+    void updateLastSend() {
+<span class="nc" id="L110">        this.lastSend = now;</span>
+<span class="nc" id="L111">    }</span>
+
+    void updateLastSendAndHeard() {
+<span class="nc" id="L114">        this.lastSend = now;</span>
+<span class="nc" id="L115">        this.lastHeard = now;</span>
+<span class="nc" id="L116">    }</span>
+
+    void readLength() throws IOException {
+<span class="nc" id="L119">        int len = incomingBuffer.getInt();</span>
+<span class="nc bnc" id="L120" title="All 4 branches missed.">        if (len &lt; 0 || len &gt; packetLen) {</span>
+<span class="nc" id="L121">            throw new IOException(&quot;Packet len &quot; + len + &quot; is out of range!&quot;);</span>
+        }
+<span class="nc" id="L123">        incomingBuffer = ByteBuffer.allocate(len);</span>
+<span class="nc" id="L124">    }</span>
+
+    void readConnectResult() throws IOException {
+<span class="nc bnc" id="L127" title="All 2 branches missed.">        if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L128">            StringBuilder buf = new StringBuilder(&quot;0x[&quot;);</span>
+<span class="nc bnc" id="L129" title="All 2 branches missed.">            for (byte b : incomingBuffer.array()) {</span>
+<span class="nc" id="L130">                buf.append(Integer.toHexString(b)).append(&quot;,&quot;);</span>
+            }
+<span class="nc" id="L132">            buf.append(&quot;]&quot;);</span>
+<span class="nc bnc" id="L133" title="All 2 branches missed.">            if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L134">                LOG.trace(&quot;readConnectResult {} {}&quot;, incomingBuffer.remaining(), buf.toString());</span>
+            }
+        }
+
+<span class="nc" id="L138">        ByteBufferInputStream bbis = new ByteBufferInputStream(incomingBuffer);</span>
+<span class="nc" id="L139">        BinaryInputArchive bbia = BinaryInputArchive.getArchive(bbis);</span>
+<span class="nc" id="L140">        ConnectResponse conRsp = new ConnectResponse();</span>
+<span class="nc" id="L141">        conRsp.deserialize(bbia, &quot;connect&quot;);</span>
+
+        // read &quot;is read-only&quot; flag
+<span class="nc" id="L144">        boolean isRO = false;</span>
+        try {
+<span class="nc" id="L146">            isRO = bbia.readBool(&quot;readOnly&quot;);</span>
+<span class="nc" id="L147">        } catch (IOException e) {</span>
+            // this is ok -- just a packet from an old server which
+            // doesn't contain readOnly field
+<span class="nc" id="L150">            LOG.warn(&quot;Connected to an old server; r-o mode will be unavailable&quot;);</span>
+<span class="nc" id="L151">        }</span>
+
+<span class="nc" id="L153">        this.sessionId = conRsp.getSessionId();</span>
+<span class="nc" id="L154">        sendThread.onConnected(conRsp.getTimeOut(), this.sessionId, conRsp.getPasswd(), isRO);</span>
+<span class="nc" id="L155">    }</span>
+
+    abstract boolean isConnected();
+
+    abstract void connect(InetSocketAddress addr) throws IOException;
+
+    /**
+     * Returns the address to which the socket is connected.
+     */
+    abstract SocketAddress getRemoteSocketAddress();
+
+    /**
+     * Returns the address to which the socket is bound.
+     */
+    abstract SocketAddress getLocalSocketAddress();
+
+    /**
+     * Clean up resources for a fresh new socket.
+     * It's called before reconnect or close.
+     */
+    abstract void cleanup();
+
+    /**
+     * new packets are added to outgoingQueue.
+     */
+    abstract void packetAdded();
+
+    /**
+     * connState is marked CLOSED and notify ClientCnxnSocket to react.
+     */
+    abstract void onClosing();
+
+    /**
+     * Sasl completes. Allows non-priming packgets to be sent.
+     * Note that this method will only be called if Sasl starts and completes.
+     */
+    abstract void saslCompleted();
+
+    /**
+     * being called after ClientCnxn finish PrimeConnection
+     */
+    abstract void connectionPrimed();
+
+    /**
+     * Do transportation work:
+     * - read packets into incomingBuffer.
+     * - write outgoing queue packets.
+     * - update relevant timestamp.
+     *
+     * @param waitTimeOut timeout in blocking wait. Unit in MilliSecond.
+     * @param pendingQueue These are the packets that have been sent and
+     *                     are waiting for a response.
+     * @param cnxn
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    abstract void doTransport(
+        int waitTimeOut,
+        Queue&lt;Packet&gt; pendingQueue,
+        ClientCnxn cnxn) throws IOException, InterruptedException;
+
+    /**
+     * Close the socket.
+     */
+    abstract void testableCloseSocket() throws IOException;
+
+    /**
+     * Close this client.
+     */
+    abstract void close();
+
+    /**
+     * Send Sasl packets directly.
+     * The Sasl process will send the first (requestHeader == null) packet,
+     * and then block the doTransport write,
+     * finally unblock it when finished.
+     */
+    abstract void sendPacket(Packet p) throws IOException;
+
+    protected void initProperties() throws IOException {
+        try {
+<span class="nc" id="L236">            packetLen = clientConfig.getInt(</span>
+                ZKConfig.JUTE_MAXBUFFER,
+                ZKClientConfig.CLIENT_MAX_PACKET_LENGTH_DEFAULT);
+<span class="nc" id="L239">            LOG.info(&quot;{} value is {} Bytes&quot;, ZKConfig.JUTE_MAXBUFFER, packetLen);</span>
+<span class="nc" id="L240">        } catch (NumberFormatException e) {</span>
+<span class="nc" id="L241">            String msg = MessageFormat.format(</span>
+                &quot;Configured value {0} for property {1} can not be parsed to int&quot;,
+<span class="nc" id="L243">                clientConfig.getProperty(ZKConfig.JUTE_MAXBUFFER),</span>
+                ZKConfig.JUTE_MAXBUFFER);
+<span class="nc" id="L245">            LOG.error(msg);</span>
+<span class="nc" id="L246">            throw new IOException(msg);</span>
+<span class="nc" id="L247">        }</span>
+<span class="nc" id="L248">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

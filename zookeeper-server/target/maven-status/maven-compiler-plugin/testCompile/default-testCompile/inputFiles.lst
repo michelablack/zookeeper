@@ -1,0 +1,13 @@
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/VisitSubTreeDFSHelperTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/VisitSubTreeDFSDeletionTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/GetPermStringTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/ValidateFileInputDirectoryTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/utils/NodeTree.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/ListSubTreeBFSTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/fileTnxLogTests/FileTxnLogAppendTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/ValidateFileInputExistsTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/ValidateFileInputReadabilityTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/utils/MemoryAppender.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/fileTnxLogTests/FileTnxLogTruncateTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/fileTnxLogTests/FIleTxnLogReadTest.java
+/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/src/test/java/org/uniroma2/it/ZKUtilTests/AclToStringTest.java

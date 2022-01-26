@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LearnerSessionTracker.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum</a> &gt; <span class="el_source">LearnerSessionTracker.java</span></div><h1>LearnerSessionTracker.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum;
+
+import java.io.PrintWriter;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import org.apache.zookeeper.KeeperException.SessionExpiredException;
+import org.apache.zookeeper.KeeperException.SessionMovedException;
+import org.apache.zookeeper.KeeperException.UnknownSessionException;
+import org.apache.zookeeper.server.SessionTrackerImpl;
+import org.apache.zookeeper.server.ZooKeeperServerListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * The learner session tracker is used by learners (followers and observers) to
+ * track zookeeper sessions which may or may not be echoed to the leader.  When
+ * a new session is created it is saved locally in a wrapped
+ * LocalSessionTracker.  It can subsequently be upgraded to a global session
+ * as required.  If an upgrade is requested the session is removed from local
+ * collections while keeping the same session ID.  It is up to the caller to
+ * queue a session creation request for the leader.
+ * A secondary function of the learner session tracker is to remember sessions
+ * which have been touched in this service.  This information is passed along
+ * to the leader with a ping.
+ */
+public class LearnerSessionTracker extends UpgradeableSessionTracker {
+
+<span class="nc" id="L53">    private static final Logger LOG = LoggerFactory.getLogger(LearnerSessionTracker.class);</span>
+
+    private final SessionExpirer expirer;
+    // Touch table for the global sessions
+<span class="nc" id="L57">    private final AtomicReference&lt;Map&lt;Long, Integer&gt;&gt; touchTable = new AtomicReference&lt;Map&lt;Long, Integer&gt;&gt;();</span>
+    private final long serverId;
+<span class="nc" id="L59">    private final AtomicLong nextSessionId = new AtomicLong();</span>
+
+    private final ConcurrentMap&lt;Long, Integer&gt; globalSessionsWithTimeouts;
+
+<span class="nc" id="L63">    public LearnerSessionTracker(SessionExpirer expirer, ConcurrentMap&lt;Long, Integer&gt; sessionsWithTimeouts, int tickTime, long id, boolean localSessionsEnabled, ZooKeeperServerListener listener) {</span>
+<span class="nc" id="L64">        this.expirer = expirer;</span>
+<span class="nc" id="L65">        this.touchTable.set(new ConcurrentHashMap&lt;Long, Integer&gt;());</span>
+<span class="nc" id="L66">        this.globalSessionsWithTimeouts = sessionsWithTimeouts;</span>
+<span class="nc" id="L67">        this.serverId = id;</span>
+<span class="nc" id="L68">        nextSessionId.set(SessionTrackerImpl.initializeNextSessionId(serverId));</span>
+
+<span class="nc" id="L70">        this.localSessionsEnabled = localSessionsEnabled;</span>
+<span class="nc bnc" id="L71" title="All 2 branches missed.">        if (this.localSessionsEnabled) {</span>
+<span class="nc" id="L72">            createLocalSessionTracker(expirer, tickTime, id, listener);</span>
+        }
+<span class="nc" id="L74">    }</span>
+
+    public void removeSession(long sessionId) {
+<span class="nc bnc" id="L77" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+<span class="nc" id="L78">            localSessionTracker.removeSession(sessionId);</span>
+        }
+<span class="nc" id="L80">        globalSessionsWithTimeouts.remove(sessionId);</span>
+<span class="nc" id="L81">        touchTable.get().remove(sessionId);</span>
+<span class="nc" id="L82">    }</span>
+
+    public void start() {
+<span class="nc bnc" id="L85" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+<span class="nc" id="L86">            localSessionTracker.start();</span>
+        }
+<span class="nc" id="L88">    }</span>
+
+    public void shutdown() {
+<span class="nc bnc" id="L91" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+<span class="nc" id="L92">            localSessionTracker.shutdown();</span>
+        }
+<span class="nc" id="L94">    }</span>
+
+    public boolean isGlobalSession(long sessionId) {
+<span class="nc" id="L97">        return globalSessionsWithTimeouts.containsKey(sessionId);</span>
+    }
+
+    public boolean trackSession(long sessionId, int sessionTimeout) {
+        // Learner doesn't track global session, do nothing here
+<span class="nc" id="L102">        return false;</span>
+    }
+
+    /**
+     * Synchronized on this to avoid race condition of adding a local session
+     * after committed global session, which may cause the same session being
+     * tracked on this server and leader.
+     */
+    public synchronized boolean commitSession(long sessionId, int sessionTimeout) {
+<span class="nc bnc" id="L111" title="All 2 branches missed.">        boolean added = globalSessionsWithTimeouts.put(sessionId, sessionTimeout) == null;</span>
+
+<span class="nc bnc" id="L113" title="All 2 branches missed.">        if (added) {</span>
+            // Only do extra logging so we know what kind of session this is
+            // if we're supporting both kinds of sessions
+<span class="nc" id="L116">            LOG.info(&quot;Committing global session 0x{}&quot;, Long.toHexString(sessionId));</span>
+        }
+
+        // If the session moved before the session upgrade finished, it's
+        // possible that the session will be added to the local session
+        // again. Need to double check and remove it from local session
+        // tracker when the global session is quorum committed, otherwise the
+        // local session might be tracked both locally and on leader.
+        //
+        // This cannot totally avoid the local session being upgraded again
+        // because there is still race condition between create another upgrade
+        // request and process the createSession commit, and there is no way
+        // to know there is a on flying createSession request because it might
+        // be upgraded by other server which owns the session before move.
+<span class="nc bnc" id="L130" title="All 2 branches missed.">        if (localSessionsEnabled) {</span>
+<span class="nc" id="L131">            removeLocalSession(sessionId);</span>
+<span class="nc" id="L132">            finishedUpgrading(sessionId);</span>
+        }
+
+<span class="nc" id="L135">        touchTable.get().put(sessionId, sessionTimeout);</span>
+<span class="nc" id="L136">        return added;</span>
+    }
+
+    public boolean touchSession(long sessionId, int sessionTimeout) {
+<span class="nc bnc" id="L140" title="All 2 branches missed.">        if (localSessionsEnabled) {</span>
+<span class="nc bnc" id="L141" title="All 2 branches missed.">            if (localSessionTracker.touchSession(sessionId, sessionTimeout)) {</span>
+<span class="nc" id="L142">                return true;</span>
+            }
+<span class="nc bnc" id="L144" title="All 4 branches missed.">            if (!isGlobalSession(sessionId) &amp;&amp; !isUpgradingSession(sessionId)) {</span>
+<span class="nc" id="L145">                return false;</span>
+            }
+        }
+<span class="nc" id="L148">        touchTable.get().put(sessionId, sessionTimeout);</span>
+<span class="nc" id="L149">        return true;</span>
+    }
+
+    public Map&lt;Long, Integer&gt; snapshot() {
+<span class="nc" id="L153">        return touchTable.getAndSet(new ConcurrentHashMap&lt;Long, Integer&gt;());</span>
+    }
+
+    public long createSession(int sessionTimeout) {
+<span class="nc bnc" id="L157" title="All 2 branches missed.">        if (localSessionsEnabled) {</span>
+<span class="nc" id="L158">            return localSessionTracker.createSession(sessionTimeout);</span>
+        }
+<span class="nc" id="L160">        return nextSessionId.getAndIncrement();</span>
+    }
+
+    public void checkSession(long sessionId, Object owner) throws SessionExpiredException, SessionMovedException {
+<span class="nc bnc" id="L164" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+            try {
+<span class="nc" id="L166">                localSessionTracker.checkSession(sessionId, owner);</span>
+<span class="nc" id="L167">                return;</span>
+<span class="nc" id="L168">            } catch (UnknownSessionException e) {</span>
+                // Check whether it's a global session. We can ignore those
+                // because they are handled at the leader, but if not, rethrow.
+                // We check local session status first to avoid race condition
+                // with session upgrading.
+<span class="nc bnc" id="L173" title="All 2 branches missed.">                if (!isGlobalSession(sessionId)) {</span>
+<span class="nc" id="L174">                    throw new SessionExpiredException();</span>
+                }
+            }
+        }
+<span class="nc" id="L178">    }</span>
+
+    public void setOwner(long sessionId, Object owner) throws SessionExpiredException {
+<span class="nc bnc" id="L181" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+            try {
+<span class="nc" id="L183">                localSessionTracker.setOwner(sessionId, owner);</span>
+<span class="nc" id="L184">                return;</span>
+<span class="nc" id="L185">            } catch (SessionExpiredException e) {</span>
+                // Check whether it's a global session. We can ignore those
+                // because they are handled at the leader, but if not, rethrow.
+                // We check local session status first to avoid race condition
+                // with session upgrading.
+<span class="nc bnc" id="L190" title="All 2 branches missed.">                if (!isGlobalSession(sessionId)) {</span>
+<span class="nc" id="L191">                    throw e;</span>
+                }
+            }
+        }
+<span class="nc" id="L195">    }</span>
+
+    public void dumpSessions(PrintWriter pwriter) {
+<span class="nc bnc" id="L198" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+<span class="nc" id="L199">            pwriter.print(&quot;Local &quot;);</span>
+<span class="nc" id="L200">            localSessionTracker.dumpSessions(pwriter);</span>
+        }
+<span class="nc" id="L202">        pwriter.print(&quot;Global Sessions(&quot;);</span>
+<span class="nc" id="L203">        pwriter.print(globalSessionsWithTimeouts.size());</span>
+<span class="nc" id="L204">        pwriter.println(&quot;):&quot;);</span>
+<span class="nc" id="L205">        SortedSet&lt;Long&gt; sessionIds = new TreeSet&lt;Long&gt;(globalSessionsWithTimeouts.keySet());</span>
+<span class="nc bnc" id="L206" title="All 2 branches missed.">        for (long sessionId : sessionIds) {</span>
+<span class="nc" id="L207">            pwriter.print(&quot;0x&quot;);</span>
+<span class="nc" id="L208">            pwriter.print(Long.toHexString(sessionId));</span>
+<span class="nc" id="L209">            pwriter.print(&quot;\t&quot;);</span>
+<span class="nc" id="L210">            pwriter.print(globalSessionsWithTimeouts.get(sessionId));</span>
+<span class="nc" id="L211">            pwriter.println(&quot;ms&quot;);</span>
+<span class="nc" id="L212">        }</span>
+<span class="nc" id="L213">    }</span>
+
+    public void setSessionClosing(long sessionId) {
+        // Global sessions handled on the leader; this call is a no-op if
+        // not tracked as a local session so safe to call in both cases.
+<span class="nc bnc" id="L218" title="All 2 branches missed.">        if (localSessionTracker != null) {</span>
+<span class="nc" id="L219">            localSessionTracker.setSessionClosing(sessionId);</span>
+        }
+<span class="nc" id="L221">    }</span>
+
+    @Override
+    public Map&lt;Long, Set&lt;Long&gt;&gt; getSessionExpiryMap() {
+<span class="nc" id="L225">        return new HashMap&lt;Long, Set&lt;Long&gt;&gt;();</span>
+    }
+
+    public Set&lt;Long&gt; globalSessions() {
+<span class="nc" id="L229">        return globalSessionsWithTimeouts.keySet();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

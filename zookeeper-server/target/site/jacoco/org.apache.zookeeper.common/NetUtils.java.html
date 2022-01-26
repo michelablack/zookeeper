@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>NetUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.common</a> &gt; <span class="el_source">NetUtils.java</span></div><h1>NetUtils.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.common;
+
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+
+/**
+ * This class contains common utilities for netstuff. Like printing IPv6 literals correctly
+ */
+<span class="nc" id="L28">public class NetUtils {</span>
+
+    public static String formatInetAddr(InetSocketAddress addr) {
+<span class="nc" id="L31">        InetAddress ia = addr.getAddress();</span>
+
+<span class="nc bnc" id="L33" title="All 2 branches missed.">        if (ia == null) {</span>
+<span class="nc" id="L34">            return String.format(&quot;%s:%s&quot;, addr.getHostString(), addr.getPort());</span>
+        }
+
+<span class="nc bnc" id="L37" title="All 2 branches missed.">        if (ia instanceof Inet6Address) {</span>
+<span class="nc" id="L38">            return String.format(&quot;[%s]:%s&quot;, ia.getHostAddress(), addr.getPort());</span>
+        } else {
+<span class="nc" id="L40">            return String.format(&quot;%s:%s&quot;, ia.getHostAddress(), addr.getPort());</span>
+        }
+    }
+
+    /**
+     * Separates host and port from given host port string if host port string is enclosed
+     * within square bracket.
+     *
+     * @param hostPort host port string
+     * @return String[]{host, port} if host port string is host:port
+     * or String[] {host, port:port} if host port string is host:port:port
+     * or String[] {host} if host port string is host
+     * or String[]{} if not a ipv6 host port string.
+     */
+    public static String[] getIPV6HostAndPort(String hostPort) {
+<span class="nc bnc" id="L55" title="All 2 branches missed.">        if (hostPort.startsWith(&quot;[&quot;)) {</span>
+<span class="nc" id="L56">            int i = hostPort.lastIndexOf(']');</span>
+<span class="nc bnc" id="L57" title="All 2 branches missed.">            if (i &lt; 0) {</span>
+<span class="nc" id="L58">                throw new IllegalArgumentException(</span>
+                    hostPort + &quot; starts with '[' but has no matching ']'&quot;);
+            }
+<span class="nc" id="L61">            String host = hostPort.substring(1, i);</span>
+<span class="nc bnc" id="L62" title="All 2 branches missed.">            if (host.isEmpty()) {</span>
+<span class="nc" id="L63">                throw new IllegalArgumentException(host + &quot; is empty.&quot;);</span>
+            }
+<span class="nc bnc" id="L65" title="All 2 branches missed.">            if (hostPort.length() &gt; i + 1) {</span>
+<span class="nc" id="L66">                return getHostPort(hostPort, i, host);</span>
+            }
+<span class="nc" id="L68">            return new String[] { host };</span>
+        } else {
+            //Not an IPV6 host port string
+<span class="nc" id="L71">            return new String[] {};</span>
+        }
+    }
+
+    private static String[] getHostPort(String hostPort, int indexOfClosingBracket, String host) {
+        // [127::1]:2181 , check separator : exits
+<span class="nc bnc" id="L77" title="All 2 branches missed.">        if (hostPort.charAt(indexOfClosingBracket + 1) != ':') {</span>
+<span class="nc" id="L78">            throw new IllegalArgumentException(hostPort + &quot; does not have : after ]&quot;);</span>
+        }
+        // [127::1]: scenario
+<span class="nc bnc" id="L81" title="All 2 branches missed.">        if (indexOfClosingBracket + 2 == hostPort.length()) {</span>
+<span class="nc" id="L82">            throw new IllegalArgumentException(hostPort + &quot; doesn't have a port after colon.&quot;);</span>
+        }
+        //do not include
+<span class="nc" id="L85">        String port = hostPort.substring(indexOfClosingBracket + 2);</span>
+<span class="nc" id="L86">        return new String[] { host, port };</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

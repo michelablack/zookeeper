@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SaslServerCallbackHandler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.auth</a> &gt; <span class="el_source">SaslServerCallbackHandler.java</span></div><h1>SaslServerCallbackHandler.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.auth;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.CallbackHandler;
+import javax.security.auth.callback.NameCallback;
+import javax.security.auth.callback.PasswordCallback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.Configuration;
+import javax.security.sasl.AuthorizeCallback;
+import javax.security.sasl.RealmCallback;
+import org.apache.zookeeper.server.ZooKeeperSaslServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class SaslServerCallbackHandler implements CallbackHandler {
+
+    private static final String USER_PREFIX = &quot;user_&quot;;
+<span class="nc" id="L40">    private static final Logger LOG = LoggerFactory.getLogger(SaslServerCallbackHandler.class);</span>
+    private static final String SYSPROP_SUPER_PASSWORD = &quot;zookeeper.SASLAuthenticationProvider.superPassword&quot;;
+    private static final String SYSPROP_REMOVE_HOST = &quot;zookeeper.kerberos.removeHostFromPrincipal&quot;;
+    private static final String SYSPROP_REMOVE_REALM = &quot;zookeeper.kerberos.removeRealmFromPrincipal&quot;;
+
+    private String userName;
+<span class="nc" id="L46">    private final Map&lt;String, String&gt; credentials = new HashMap&lt;String, String&gt;();</span>
+
+<span class="nc" id="L48">    public SaslServerCallbackHandler(Configuration configuration) throws IOException {</span>
+<span class="nc" id="L49">        String serverSection = System.getProperty(</span>
+            ZooKeeperSaslServer.LOGIN_CONTEXT_NAME_KEY,
+            ZooKeeperSaslServer.DEFAULT_LOGIN_CONTEXT_NAME);
+
+<span class="nc" id="L53">        AppConfigurationEntry[] configurationEntries = configuration.getAppConfigurationEntry(serverSection);</span>
+
+<span class="nc bnc" id="L55" title="All 2 branches missed.">        if (configurationEntries == null) {</span>
+<span class="nc" id="L56">            String errorMessage = &quot;Could not find a '&quot; + serverSection + &quot;' entry in this configuration: Server cannot start.&quot;;</span>
+<span class="nc" id="L57">            LOG.error(errorMessage);</span>
+<span class="nc" id="L58">            throw new IOException(errorMessage);</span>
+        }
+<span class="nc" id="L60">        credentials.clear();</span>
+<span class="nc bnc" id="L61" title="All 2 branches missed.">        for (AppConfigurationEntry entry : configurationEntries) {</span>
+<span class="nc" id="L62">            Map&lt;String, ?&gt; options = entry.getOptions();</span>
+            // Populate DIGEST-MD5 user -&gt; password map with JAAS configuration entries from the &quot;Server&quot; section.
+            // Usernames are distinguished from other options by prefixing the username with a &quot;user_&quot; prefix.
+<span class="nc bnc" id="L65" title="All 2 branches missed.">            for (Map.Entry&lt;String, ?&gt; pair : options.entrySet()) {</span>
+<span class="nc" id="L66">                String key = pair.getKey();</span>
+<span class="nc bnc" id="L67" title="All 2 branches missed.">                if (key.startsWith(USER_PREFIX)) {</span>
+<span class="nc" id="L68">                    String userName = key.substring(USER_PREFIX.length());</span>
+<span class="nc" id="L69">                    credentials.put(userName, (String) pair.getValue());</span>
+                }
+<span class="nc" id="L71">            }</span>
+        }
+<span class="nc" id="L73">    }</span>
+
+    public void handle(Callback[] callbacks) throws UnsupportedCallbackException {
+<span class="nc bnc" id="L76" title="All 2 branches missed.">        for (Callback callback : callbacks) {</span>
+<span class="nc bnc" id="L77" title="All 2 branches missed.">            if (callback instanceof NameCallback) {</span>
+<span class="nc" id="L78">                handleNameCallback((NameCallback) callback);</span>
+<span class="nc bnc" id="L79" title="All 2 branches missed.">            } else if (callback instanceof PasswordCallback) {</span>
+<span class="nc" id="L80">                handlePasswordCallback((PasswordCallback) callback);</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">            } else if (callback instanceof RealmCallback) {</span>
+<span class="nc" id="L82">                handleRealmCallback((RealmCallback) callback);</span>
+<span class="nc bnc" id="L83" title="All 2 branches missed.">            } else if (callback instanceof AuthorizeCallback) {</span>
+<span class="nc" id="L84">                handleAuthorizeCallback((AuthorizeCallback) callback);</span>
+            }
+        }
+<span class="nc" id="L87">    }</span>
+
+    private void handleNameCallback(NameCallback nc) {
+        // check to see if this user is in the user password database.
+<span class="nc bnc" id="L91" title="All 2 branches missed.">        if (credentials.get(nc.getDefaultName()) == null) {</span>
+<span class="nc" id="L92">            LOG.warn(&quot;User '{}' not found in list of DIGEST-MD5 authenticateable users.&quot;, nc.getDefaultName());</span>
+<span class="nc" id="L93">            return;</span>
+        }
+<span class="nc" id="L95">        nc.setName(nc.getDefaultName());</span>
+<span class="nc" id="L96">        userName = nc.getDefaultName();</span>
+<span class="nc" id="L97">    }</span>
+
+    private void handlePasswordCallback(PasswordCallback pc) {
+<span class="nc bnc" id="L100" title="All 4 branches missed.">        if (&quot;super&quot;.equals(this.userName) &amp;&amp; System.getProperty(SYSPROP_SUPER_PASSWORD) != null) {</span>
+            // superuser: use Java system property for password, if available.
+<span class="nc" id="L102">            pc.setPassword(System.getProperty(SYSPROP_SUPER_PASSWORD).toCharArray());</span>
+<span class="nc bnc" id="L103" title="All 2 branches missed.">        } else if (credentials.containsKey(userName)) {</span>
+<span class="nc" id="L104">            pc.setPassword(credentials.get(userName).toCharArray());</span>
+        } else {
+<span class="nc" id="L106">            LOG.warn(&quot;No password found for user: {}&quot;, userName);</span>
+        }
+<span class="nc" id="L108">    }</span>
+
+    private void handleRealmCallback(RealmCallback rc) {
+<span class="nc" id="L111">        LOG.debug(&quot;client supplied realm: {}&quot;, rc.getDefaultText());</span>
+<span class="nc" id="L112">        rc.setText(rc.getDefaultText());</span>
+<span class="nc" id="L113">    }</span>
+
+    private void handleAuthorizeCallback(AuthorizeCallback ac) {
+<span class="nc" id="L116">        String authenticationID = ac.getAuthenticationID();</span>
+<span class="nc" id="L117">        String authorizationID = ac.getAuthorizationID();</span>
+
+<span class="nc" id="L119">        LOG.info(&quot;Successfully authenticated client: authenticationID={};  authorizationID={}.&quot;,</span>
+                 authenticationID, authorizationID);
+<span class="nc" id="L121">        ac.setAuthorized(true);</span>
+
+        // canonicalize authorization id according to system properties:
+        // zookeeper.kerberos.removeRealmFromPrincipal(={true,false})
+        // zookeeper.kerberos.removeHostFromPrincipal(={true,false})
+<span class="nc" id="L126">        KerberosName kerberosName = new KerberosName(authenticationID);</span>
+        try {
+<span class="nc" id="L128">            StringBuilder userNameBuilder = new StringBuilder(kerberosName.getShortName());</span>
+<span class="nc bnc" id="L129" title="All 2 branches missed.">            if (shouldAppendHost(kerberosName)) {</span>
+<span class="nc" id="L130">                userNameBuilder.append(&quot;/&quot;).append(kerberosName.getHostName());</span>
+            }
+<span class="nc bnc" id="L132" title="All 2 branches missed.">            if (shouldAppendRealm(kerberosName)) {</span>
+<span class="nc" id="L133">                userNameBuilder.append(&quot;@&quot;).append(kerberosName.getRealm());</span>
+            }
+<span class="nc" id="L135">            LOG.info(&quot;Setting authorizedID: {}&quot;, userNameBuilder);</span>
+<span class="nc" id="L136">            ac.setAuthorizedID(userNameBuilder.toString());</span>
+<span class="nc" id="L137">        } catch (IOException e) {</span>
+<span class="nc" id="L138">            LOG.error(&quot;Failed to set name based on Kerberos authentication rules.&quot;, e);</span>
+<span class="nc" id="L139">        }</span>
+<span class="nc" id="L140">    }</span>
+
+    private boolean shouldAppendRealm(KerberosName kerberosName) {
+<span class="nc bnc" id="L143" title="All 4 branches missed.">        return !isSystemPropertyTrue(SYSPROP_REMOVE_REALM) &amp;&amp; kerberosName.getRealm() != null;</span>
+    }
+
+    private boolean shouldAppendHost(KerberosName kerberosName) {
+<span class="nc bnc" id="L147" title="All 4 branches missed.">        return !isSystemPropertyTrue(SYSPROP_REMOVE_HOST) &amp;&amp; kerberosName.getHostName() != null;</span>
+    }
+
+    private boolean isSystemPropertyTrue(String propertyName) {
+<span class="nc" id="L151">        return &quot;true&quot;.equals(System.getProperty(propertyName));</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

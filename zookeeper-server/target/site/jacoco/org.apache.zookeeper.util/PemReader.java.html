@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PemReader.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.util</a> &gt; <span class="el_source">PemReader.java</span></div><h1>PemReader.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.util;
+
+import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.util.Base64.getMimeDecoder;
+import static java.util.regex.Pattern.CASE_INSENSITIVE;
+import static javax.crypto.Cipher.DECRYPT_MODE;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.crypto.Cipher;
+import javax.crypto.EncryptedPrivateKeyInfo;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+import javax.security.auth.x500.X500Principal;
+
+/**
+ * Note: this class is copied from io.airlift.security.pem.PemReader (see
+ * https://github.com/airlift/airlift/blob/master/security/src/main/java/io/airlift/security/pem/PemReader.java) with
+ * permission of the authors, to avoid adding an extra library dependency to Zookeeper.
+ * The file was copied from commit hash 86348546af43217f4d04a0cdad624b0ae4751c2c.
+ *
+ * The following modifications have been made to the original source code:
+ * &lt;ul&gt;
+ * &lt;li&gt;imports have been rearranged to match Zookeeper import order style.&lt;/li&gt;
+ * &lt;li&gt;The dependency on &lt;code&gt;com.google.common.io.Files.asCharSource&lt;/code&gt; has been removed.&lt;/li&gt;
+ * &lt;li&gt;A dependency on &lt;code&gt;java.nio.file.Files&lt;/code&gt; has been added.&lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public final class PemReader {
+
+<span class="nc" id="L69">    private static final Pattern CERT_PATTERN = Pattern.compile(</span>
+        &quot;-+BEGIN\\s+.*CERTIFICATE[^-]*-+(?:\\s|\\r|\\n)+&quot; // Header
+        + &quot;([a-z0-9+/=\\r\\n]+)&quot;                     // Base64 text
+        + &quot;-+END\\s+.*CERTIFICATE[^-]*-+&quot;,           // Footer
+        CASE_INSENSITIVE);
+
+<span class="nc" id="L75">    private static final Pattern PRIVATE_KEY_PATTERN = Pattern.compile(</span>
+        &quot;-+BEGIN\\s+.*PRIVATE\\s+KEY[^-]*-+(?:\\s|\\r|\\n)+&quot; // Header
+        + &quot;([a-z0-9+/=\\r\\n]+)&quot;                       // Base64 text
+        + &quot;-+END\\s+.*PRIVATE\\s+KEY[^-]*-+&quot;,            // Footer
+        CASE_INSENSITIVE);
+
+<span class="nc" id="L81">    private static final Pattern PUBLIC_KEY_PATTERN = Pattern.compile(</span>
+        &quot;-+BEGIN\\s+.*PUBLIC\\s+KEY[^-]*-+(?:\\s|\\r|\\n)+&quot; // Header
+        + &quot;([a-z0-9+/=\\r\\n]+)&quot;                      // Base64 text
+        + &quot;-+END\\s+.*PUBLIC\\s+KEY[^-]*-+&quot;,            // Footer
+        CASE_INSENSITIVE);
+
+    private PemReader() {
+    }
+
+    public static KeyStore loadTrustStore(File certificateChainFile) throws IOException, GeneralSecurityException {
+<span class="nc" id="L91">        KeyStore keyStore = KeyStore.getInstance(&quot;JKS&quot;);</span>
+<span class="nc" id="L92">        keyStore.load(null, null);</span>
+
+<span class="nc" id="L94">        List&lt;X509Certificate&gt; certificateChain = readCertificateChain(certificateChainFile);</span>
+<span class="nc bnc" id="L95" title="All 2 branches missed.">        for (X509Certificate certificate : certificateChain) {</span>
+<span class="nc" id="L96">            X500Principal principal = certificate.getSubjectX500Principal();</span>
+<span class="nc" id="L97">            keyStore.setCertificateEntry(principal.getName(&quot;RFC2253&quot;), certificate);</span>
+<span class="nc" id="L98">        }</span>
+<span class="nc" id="L99">        return keyStore;</span>
+    }
+
+    public static KeyStore loadKeyStore(File certificateChainFile, File privateKeyFile, Optional&lt;String&gt; keyPassword) throws IOException, GeneralSecurityException {
+<span class="nc" id="L103">        PrivateKey key = loadPrivateKey(privateKeyFile, keyPassword);</span>
+
+<span class="nc" id="L105">        List&lt;X509Certificate&gt; certificateChain = readCertificateChain(certificateChainFile);</span>
+<span class="nc bnc" id="L106" title="All 2 branches missed.">        if (certificateChain.isEmpty()) {</span>
+<span class="nc" id="L107">            throw new CertificateException(&quot;Certificate file does not contain any certificates: &quot;</span>
+                                           + certificateChainFile);
+        }
+
+<span class="nc" id="L111">        KeyStore keyStore = KeyStore.getInstance(&quot;JKS&quot;);</span>
+<span class="nc" id="L112">        keyStore.load(null, null);</span>
+<span class="nc" id="L113">        keyStore.setKeyEntry(&quot;key&quot;,</span>
+                             key,
+<span class="nc" id="L115">                             keyPassword.orElse(&quot;&quot;).toCharArray(),</span>
+<span class="nc" id="L116">                             certificateChain.toArray(new Certificate[0]));</span>
+<span class="nc" id="L117">        return keyStore;</span>
+    }
+
+    public static List&lt;X509Certificate&gt; readCertificateChain(File certificateChainFile) throws IOException, GeneralSecurityException {
+<span class="nc" id="L121">        String contents = new String(Files.readAllBytes(certificateChainFile.toPath()), US_ASCII);</span>
+<span class="nc" id="L122">        return readCertificateChain(contents);</span>
+    }
+
+    public static List&lt;X509Certificate&gt; readCertificateChain(String certificateChain) throws CertificateException {
+<span class="nc" id="L126">        Matcher matcher = CERT_PATTERN.matcher(certificateChain);</span>
+<span class="nc" id="L127">        CertificateFactory certificateFactory = CertificateFactory.getInstance(&quot;X.509&quot;);</span>
+<span class="nc" id="L128">        List&lt;X509Certificate&gt; certificates = new ArrayList&lt;&gt;();</span>
+
+<span class="nc" id="L130">        int start = 0;</span>
+<span class="nc bnc" id="L131" title="All 2 branches missed.">        while (matcher.find(start)) {</span>
+<span class="nc" id="L132">            byte[] buffer = base64Decode(matcher.group(1));</span>
+<span class="nc" id="L133">            certificates.add((X509Certificate) certificateFactory.generateCertificate(new ByteArrayInputStream(buffer)));</span>
+<span class="nc" id="L134">            start = matcher.end();</span>
+<span class="nc" id="L135">        }</span>
+
+<span class="nc" id="L137">        return certificates;</span>
+    }
+
+    public static PrivateKey loadPrivateKey(File privateKeyFile, Optional&lt;String&gt; keyPassword) throws IOException, GeneralSecurityException {
+<span class="nc" id="L141">        String privateKey = new String(Files.readAllBytes(privateKeyFile.toPath()), US_ASCII);</span>
+<span class="nc" id="L142">        return loadPrivateKey(privateKey, keyPassword);</span>
+    }
+
+    public static PrivateKey loadPrivateKey(String privateKey, Optional&lt;String&gt; keyPassword) throws IOException, GeneralSecurityException {
+<span class="nc" id="L146">        Matcher matcher = PRIVATE_KEY_PATTERN.matcher(privateKey);</span>
+<span class="nc bnc" id="L147" title="All 2 branches missed.">        if (!matcher.find()) {</span>
+<span class="nc" id="L148">            throw new KeyStoreException(&quot;did not find a private key&quot;);</span>
+        }
+<span class="nc" id="L150">        byte[] encodedKey = base64Decode(matcher.group(1));</span>
+
+        PKCS8EncodedKeySpec encodedKeySpec;
+<span class="nc bnc" id="L153" title="All 2 branches missed.">        if (keyPassword.isPresent()) {</span>
+<span class="nc" id="L154">            EncryptedPrivateKeyInfo encryptedPrivateKeyInfo = new EncryptedPrivateKeyInfo(encodedKey);</span>
+<span class="nc" id="L155">            SecretKeyFactory keyFactory = SecretKeyFactory.getInstance(encryptedPrivateKeyInfo.getAlgName());</span>
+<span class="nc" id="L156">            SecretKey secretKey = keyFactory.generateSecret(new PBEKeySpec(keyPassword.get().toCharArray()));</span>
+
+<span class="nc" id="L158">            Cipher cipher = Cipher.getInstance(encryptedPrivateKeyInfo.getAlgName());</span>
+<span class="nc" id="L159">            cipher.init(DECRYPT_MODE, secretKey, encryptedPrivateKeyInfo.getAlgParameters());</span>
+
+<span class="nc" id="L161">            encodedKeySpec = encryptedPrivateKeyInfo.getKeySpec(cipher);</span>
+<span class="nc" id="L162">        } else {</span>
+<span class="nc" id="L163">            encodedKeySpec = new PKCS8EncodedKeySpec(encodedKey);</span>
+        }
+
+        // this code requires a key in PKCS8 format which is not the default openssl format
+        // to convert to the PKCS8 format you use : openssl pkcs8 -topk8 ...
+        try {
+<span class="nc" id="L169">            KeyFactory keyFactory = KeyFactory.getInstance(&quot;RSA&quot;);</span>
+<span class="nc" id="L170">            return keyFactory.generatePrivate(encodedKeySpec);</span>
+<span class="nc" id="L171">        } catch (InvalidKeySpecException ignore) {</span>
+        }
+
+        try {
+<span class="nc" id="L175">            KeyFactory keyFactory = KeyFactory.getInstance(&quot;EC&quot;);</span>
+<span class="nc" id="L176">            return keyFactory.generatePrivate(encodedKeySpec);</span>
+<span class="nc" id="L177">        } catch (InvalidKeySpecException ignore) {</span>
+        }
+
+<span class="nc" id="L180">        KeyFactory keyFactory = KeyFactory.getInstance(&quot;DSA&quot;);</span>
+<span class="nc" id="L181">        return keyFactory.generatePrivate(encodedKeySpec);</span>
+    }
+
+    public static PublicKey loadPublicKey(File publicKeyFile) throws IOException, GeneralSecurityException {
+<span class="nc" id="L185">        String publicKey = new String(Files.readAllBytes(publicKeyFile.toPath()), US_ASCII);</span>
+<span class="nc" id="L186">        return loadPublicKey(publicKey);</span>
+    }
+
+    public static PublicKey loadPublicKey(String publicKey) throws GeneralSecurityException {
+<span class="nc" id="L190">        Matcher matcher = PUBLIC_KEY_PATTERN.matcher(publicKey);</span>
+<span class="nc bnc" id="L191" title="All 2 branches missed.">        if (!matcher.find()) {</span>
+<span class="nc" id="L192">            throw new KeyStoreException(&quot;did not find a public key&quot;);</span>
+        }
+<span class="nc" id="L194">        String data = matcher.group(1);</span>
+<span class="nc" id="L195">        byte[] encodedKey = base64Decode(data);</span>
+
+<span class="nc" id="L197">        X509EncodedKeySpec encodedKeySpec = new X509EncodedKeySpec(encodedKey);</span>
+        try {
+<span class="nc" id="L199">            KeyFactory keyFactory = KeyFactory.getInstance(&quot;RSA&quot;);</span>
+<span class="nc" id="L200">            return keyFactory.generatePublic(encodedKeySpec);</span>
+<span class="nc" id="L201">        } catch (InvalidKeySpecException ignore) {</span>
+        }
+
+        try {
+<span class="nc" id="L205">            KeyFactory keyFactory = KeyFactory.getInstance(&quot;EC&quot;);</span>
+<span class="nc" id="L206">            return keyFactory.generatePublic(encodedKeySpec);</span>
+<span class="nc" id="L207">        } catch (InvalidKeySpecException ignore) {</span>
+        }
+
+<span class="nc" id="L210">        KeyFactory keyFactory = KeyFactory.getInstance(&quot;DSA&quot;);</span>
+<span class="nc" id="L211">        return keyFactory.generatePublic(encodedKeySpec);</span>
+    }
+
+    private static byte[] base64Decode(String base64) {
+<span class="nc" id="L215">        return getMimeDecoder().decode(base64.getBytes(US_ASCII));</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

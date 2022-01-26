@@ -1,0 +1,465 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ZooKeeperSaslClient.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.client</a> &gt; <span class="el_source">ZooKeeperSaslClient.java</span></div><h1>ZooKeeperSaslClient.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.client;
+
+import java.io.IOException;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
+import javax.security.auth.Subject;
+import javax.security.auth.login.AppConfigurationEntry;
+import javax.security.auth.login.Configuration;
+import javax.security.auth.login.LoginException;
+import javax.security.sasl.SaslClient;
+import javax.security.sasl.SaslException;
+import org.apache.zookeeper.AsyncCallback;
+import org.apache.zookeeper.ClientCnxn;
+import org.apache.zookeeper.Login;
+import org.apache.zookeeper.SaslClientCallbackHandler;
+import org.apache.zookeeper.Watcher.Event.KeeperState;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.proto.GetSASLRequest;
+import org.apache.zookeeper.proto.SetSASLResponse;
+import org.apache.zookeeper.util.SecurityUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This class manages SASL authentication for the client. It
+ * allows ClientCnxn to authenticate using SASL with a ZooKeeper server.
+ */
+public class ZooKeeperSaslClient {
+
+    /**
+     * @deprecated Use {@link ZKClientConfig#LOGIN_CONTEXT_NAME_KEY}
+     *             instead.
+     */
+    @Deprecated
+    public static final String LOGIN_CONTEXT_NAME_KEY = &quot;zookeeper.sasl.clientconfig&quot;;
+    /**
+     * @deprecated Use {@link ZKClientConfig#ENABLE_CLIENT_SASL_KEY}
+     *             instead.
+     */
+    @Deprecated
+    public static final String ENABLE_CLIENT_SASL_KEY = &quot;zookeeper.sasl.client&quot;;
+    /**
+     * @deprecated Use {@link ZKClientConfig#ENABLE_CLIENT_SASL_DEFAULT}
+     *             instead.
+     */
+    @Deprecated
+    public static final String ENABLE_CLIENT_SASL_DEFAULT = &quot;true&quot;;
+<span class="nc" id="L67">    private volatile boolean initializedLogin = false;</span>
+
+    /**
+     * Returns true if the SASL client is enabled. By default, the client
+     * is enabled but can be disabled by setting the system property
+     * &lt;code&gt;zookeeper.sasl.client&lt;/code&gt; to &lt;code&gt;false&lt;/code&gt;. See
+     * ZOOKEEPER-1657 for more information.
+     *
+     * @return true if the SASL client is enabled.
+     * @deprecated Use {@link ZKClientConfig#isSaslClientEnabled} instead
+     */
+    @Deprecated
+    public static boolean isEnabled() {
+<span class="nc" id="L80">        return Boolean.parseBoolean(System.getProperty(ZKClientConfig.ENABLE_CLIENT_SASL_KEY, ZKClientConfig.ENABLE_CLIENT_SASL_DEFAULT));</span>
+    }
+
+<span class="nc" id="L83">    private static final Logger LOG = LoggerFactory.getLogger(ZooKeeperSaslClient.class);</span>
+<span class="nc" id="L84">    private Login login = null;</span>
+    private SaslClient saslClient;
+<span class="nc" id="L86">    private boolean isSASLConfigured = true;</span>
+    private final ZKClientConfig clientConfig;
+
+<span class="nc" id="L89">    private byte[] saslToken = new byte[0];</span>
+
+<span class="nc" id="L91">    public enum SaslState {</span>
+<span class="nc" id="L92">        INITIAL,</span>
+<span class="nc" id="L93">        INTERMEDIATE,</span>
+<span class="nc" id="L94">        COMPLETE,</span>
+<span class="nc" id="L95">        FAILED</span>
+    }
+
+<span class="nc" id="L98">    private SaslState saslState = SaslState.INITIAL;</span>
+
+<span class="nc" id="L100">    private boolean gotLastPacket = false;</span>
+    /** informational message indicating the current configuration status */
+    private final String configStatus;
+
+    public SaslState getSaslState() {
+<span class="nc" id="L105">        return saslState;</span>
+    }
+
+    public String getLoginContext() {
+<span class="nc bnc" id="L109" title="All 2 branches missed.">        if (login != null) {</span>
+<span class="nc" id="L110">            return login.getLoginContextName();</span>
+        }
+<span class="nc" id="L112">        return null;</span>
+    }
+
+<span class="nc" id="L115">    public ZooKeeperSaslClient(final String serverPrincipal, ZKClientConfig clientConfig) throws LoginException {</span>
+        /**
+         * ZOOKEEPER-1373: allow system property to specify the JAAS
+         * configuration section that the zookeeper client should use.
+         * Default to &quot;Client&quot;.
+         */
+<span class="nc" id="L121">        String clientSection = clientConfig.getProperty(ZKClientConfig.LOGIN_CONTEXT_NAME_KEY, ZKClientConfig.LOGIN_CONTEXT_NAME_KEY_DEFAULT);</span>
+<span class="nc" id="L122">        this.clientConfig = clientConfig;</span>
+        // Note that 'Configuration' here refers to javax.security.auth.login.Configuration.
+<span class="nc" id="L124">        AppConfigurationEntry[] entries = null;</span>
+<span class="nc" id="L125">        RuntimeException runtimeException = null;</span>
+        try {
+<span class="nc" id="L127">            entries = Configuration.getConfiguration().getAppConfigurationEntry(clientSection);</span>
+<span class="nc" id="L128">        } catch (SecurityException e) {</span>
+            // handle below: might be harmless if the user doesn't intend to use JAAS authentication.
+<span class="nc" id="L130">            runtimeException = e;</span>
+<span class="nc" id="L131">        } catch (IllegalArgumentException e) {</span>
+            // third party customized getAppConfigurationEntry could throw IllegalArgumentException when JAAS
+            // configuration isn't set. We can reevaluate whether to catch RuntimeException instead when more
+            // different types of RuntimeException found
+<span class="nc" id="L135">            runtimeException = e;</span>
+<span class="nc" id="L136">        }</span>
+<span class="nc bnc" id="L137" title="All 2 branches missed.">        if (entries != null) {</span>
+<span class="nc" id="L138">            this.configStatus = &quot;Will attempt to SASL-authenticate using Login Context section '&quot; + clientSection + &quot;'&quot;;</span>
+<span class="nc" id="L139">            this.saslClient = createSaslClient(serverPrincipal, clientSection);</span>
+        } else {
+            // Handle situation of clientSection's being null: it might simply because the client does not intend to
+            // use SASL, so not necessarily an error.
+<span class="nc" id="L143">            saslState = SaslState.FAILED;</span>
+<span class="nc" id="L144">            String explicitClientSection = clientConfig.getProperty(ZKClientConfig.LOGIN_CONTEXT_NAME_KEY);</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">            if (explicitClientSection != null) {</span>
+                // If the user explicitly overrides the default Login Context, they probably expected SASL to
+                // succeed. But if we got here, SASL failed.
+<span class="nc bnc" id="L148" title="All 2 branches missed.">                if (runtimeException != null) {</span>
+<span class="nc" id="L149">                    throw new LoginException(&quot;Zookeeper client cannot authenticate using the &quot;</span>
+                                             + explicitClientSection
+                                             + &quot; section of the supplied JAAS configuration: '&quot;
+<span class="nc" id="L152">                                             + clientConfig.getJaasConfKey()</span>
+                                             + &quot;' because of a &quot;
+                                             + &quot;RuntimeException: &quot;
+                                             + runtimeException);
+                } else {
+<span class="nc" id="L157">                    throw new LoginException(&quot;Client cannot SASL-authenticate because the specified JAAS configuration &quot;</span>
+                                             + &quot;section '&quot;
+                                             + explicitClientSection
+                                             + &quot;' could not be found.&quot;);
+                }
+            } else {
+                // The user did not override the default context. It might be that they just don't intend to use SASL,
+                // so log at INFO, not WARN, since they don't expect any SASL-related information.
+<span class="nc" id="L165">                String msg = &quot;Will not attempt to authenticate using SASL &quot;;</span>
+<span class="nc bnc" id="L166" title="All 2 branches missed.">                if (runtimeException != null) {</span>
+<span class="nc" id="L167">                    msg += &quot;(&quot; + runtimeException + &quot;)&quot;;</span>
+                } else {
+<span class="nc" id="L169">                    msg += &quot;(unknown error)&quot;;</span>
+                }
+<span class="nc" id="L171">                this.configStatus = msg;</span>
+<span class="nc" id="L172">                this.isSASLConfigured = false;</span>
+            }
+<span class="nc bnc" id="L174" title="All 2 branches missed.">            if (clientConfig.getJaasConfKey() != null) {</span>
+                // Again, the user explicitly set something SASL-related, so
+                // they probably expected SASL to succeed.
+<span class="nc bnc" id="L177" title="All 2 branches missed.">                if (runtimeException != null) {</span>
+<span class="nc" id="L178">                    throw new LoginException(&quot;Zookeeper client cannot authenticate using the '&quot;</span>
+<span class="nc" id="L179">                                             + clientConfig.getProperty(ZKClientConfig.LOGIN_CONTEXT_NAME_KEY, ZKClientConfig.LOGIN_CONTEXT_NAME_KEY_DEFAULT)</span>
+                                             + &quot;' section of the supplied JAAS configuration: '&quot;
+<span class="nc" id="L181">                                             + clientConfig.getJaasConfKey()</span>
+                                             + &quot;' because of a &quot;
+                                             + &quot;RuntimeException: &quot;
+                                             + runtimeException);
+                } else {
+<span class="nc" id="L186">                    throw new LoginException(&quot;No JAAS configuration section named '&quot;</span>
+<span class="nc" id="L187">                                             + clientConfig.getProperty(ZKClientConfig.LOGIN_CONTEXT_NAME_KEY, ZKClientConfig.LOGIN_CONTEXT_NAME_KEY_DEFAULT)</span>
+                                             + &quot;' was found in specified JAAS configuration file: '&quot;
+<span class="nc" id="L189">                                             + clientConfig.getJaasConfKey()</span>
+                                             + &quot;'.&quot;);
+                }
+            }
+        }
+<span class="nc" id="L194">    }</span>
+
+    /**
+     * @return informational message indicating the current configuration status.
+     */
+    public String getConfigStatus() {
+<span class="nc" id="L200">        return configStatus;</span>
+    }
+
+    public boolean isComplete() {
+<span class="nc bnc" id="L204" title="All 2 branches missed.">        return (saslState == SaslState.COMPLETE);</span>
+    }
+
+    public boolean isFailed() {
+<span class="nc bnc" id="L208" title="All 2 branches missed.">        return (saslState == SaslState.FAILED);</span>
+    }
+
+<span class="nc" id="L211">    public static class ServerSaslResponseCallback implements AsyncCallback.DataCallback {</span>
+
+        public void processResult(int rc, String path, Object ctx, byte[] data, Stat stat) {
+            // processResult() is used by ClientCnxn's sendThread to respond to
+            // data[] contains the Zookeeper Server's SASL token.
+            // ctx is the ZooKeeperSaslClient object. We use this object's respondToServer() method
+            // to reply to the Zookeeper Server's SASL token
+<span class="nc" id="L218">            ZooKeeperSaslClient client = ((ClientCnxn) ctx).zooKeeperSaslClient;</span>
+<span class="nc bnc" id="L219" title="All 2 branches missed.">            if (client == null) {</span>
+<span class="nc" id="L220">                LOG.warn(&quot;sasl client was unexpectedly null: cannot respond to Zookeeper server.&quot;);</span>
+<span class="nc" id="L221">                return;</span>
+            }
+<span class="nc" id="L223">            byte[] usedata = data;</span>
+<span class="nc bnc" id="L224" title="All 2 branches missed.">            if (data != null) {</span>
+<span class="nc" id="L225">                LOG.debug(&quot;ServerSaslResponseCallback(): saslToken server response: (length={})&quot;, usedata.length);</span>
+            } else {
+<span class="nc" id="L227">                usedata = new byte[0];</span>
+<span class="nc" id="L228">                LOG.debug(&quot;ServerSaslResponseCallback(): using empty data[] as server response (length={})&quot;, usedata.length);</span>
+            }
+<span class="nc" id="L230">            client.respondToServer(usedata, (ClientCnxn) ctx);</span>
+<span class="nc" id="L231">        }</span>
+
+    }
+
+    private SaslClient createSaslClient(
+        final String servicePrincipal,
+        final String loginContext) throws LoginException {
+        try {
+<span class="nc bnc" id="L239" title="All 2 branches missed.">            if (!initializedLogin) {</span>
+<span class="nc" id="L240">                synchronized (this) {</span>
+<span class="nc bnc" id="L241" title="All 2 branches missed.">                    if (login == null) {</span>
+<span class="nc" id="L242">                        LOG.debug(&quot;JAAS loginContext is: {}&quot;, loginContext);</span>
+                        // note that the login object is static: it's shared amongst all zookeeper-related connections.
+                        // in order to ensure the login is initialized only once, it must be synchronized the code snippet.
+<span class="nc" id="L245">                        login = new Login(loginContext, new SaslClientCallbackHandler(null, &quot;Client&quot;), clientConfig);</span>
+<span class="nc" id="L246">                        login.startThreadIfNeeded();</span>
+<span class="nc" id="L247">                        initializedLogin = true;</span>
+                    }
+<span class="nc" id="L249">                }</span>
+            }
+<span class="nc" id="L251">            return SecurityUtils.createSaslClient(login.getSubject(), servicePrincipal, &quot;zookeeper&quot;, &quot;zk-sasl-md5&quot;, LOG, &quot;Client&quot;);</span>
+<span class="nc" id="L252">        } catch (LoginException e) {</span>
+            // We throw LoginExceptions...
+<span class="nc" id="L254">            throw e;</span>
+<span class="nc" id="L255">        } catch (Exception e) {</span>
+            // ..but consume (with a log message) all other types of exceptions.
+<span class="nc" id="L257">            LOG.error(&quot;Exception while trying to create SASL client.&quot;, e);</span>
+<span class="nc" id="L258">            return null;</span>
+        }
+    }
+
+    public void respondToServer(byte[] serverToken, ClientCnxn cnxn) {
+<span class="nc bnc" id="L263" title="All 2 branches missed.">        if (saslClient == null) {</span>
+<span class="nc" id="L264">            LOG.error(&quot;saslClient is unexpectedly null. Cannot respond to server's SASL message; ignoring.&quot;);</span>
+<span class="nc" id="L265">            return;</span>
+        }
+
+<span class="nc bnc" id="L268" title="All 2 branches missed.">        if (!(saslClient.isComplete())) {</span>
+            try {
+<span class="nc" id="L270">                saslToken = createSaslToken(serverToken);</span>
+<span class="nc bnc" id="L271" title="All 2 branches missed.">                if (saslToken != null) {</span>
+<span class="nc" id="L272">                    sendSaslPacket(saslToken, cnxn);</span>
+                }
+<span class="nc" id="L274">            } catch (SaslException e) {</span>
+<span class="nc" id="L275">                LOG.error(</span>
+                    &quot;SASL authentication failed using login context '{}'.&quot;,
+<span class="nc" id="L277">                    this.getLoginContext(),</span>
+                    e);
+<span class="nc" id="L279">                saslState = SaslState.FAILED;</span>
+<span class="nc" id="L280">                gotLastPacket = true;</span>
+<span class="nc" id="L281">            }</span>
+        }
+
+<span class="nc bnc" id="L284" title="All 2 branches missed.">        if (saslClient.isComplete()) {</span>
+            // GSSAPI: server sends a final packet after authentication succeeds
+            // or fails.
+<span class="nc bnc" id="L287" title="All 4 branches missed.">            if ((serverToken == null) &amp;&amp; (saslClient.getMechanismName().equals(&quot;GSSAPI&quot;))) {</span>
+<span class="nc" id="L288">                gotLastPacket = true;</span>
+            }
+            // non-GSSAPI: no final packet from server.
+<span class="nc bnc" id="L291" title="All 2 branches missed.">            if (!saslClient.getMechanismName().equals(&quot;GSSAPI&quot;)) {</span>
+<span class="nc" id="L292">                gotLastPacket = true;</span>
+            }
+            // SASL authentication is completed, successfully or not:
+            // enable the socket's writable flag so that any packets waiting for authentication to complete in
+            // the outgoing queue will be sent to the Zookeeper server.
+<span class="nc" id="L297">            cnxn.saslCompleted();</span>
+        }
+<span class="nc" id="L299">    }</span>
+
+    private byte[] createSaslToken() throws SaslException {
+<span class="nc" id="L302">        saslState = SaslState.INTERMEDIATE;</span>
+<span class="nc" id="L303">        return createSaslToken(saslToken);</span>
+    }
+
+    private byte[] createSaslToken(final byte[] saslToken) throws SaslException {
+<span class="nc bnc" id="L307" title="All 2 branches missed.">        if (saslToken == null) {</span>
+            // TODO: introspect about runtime environment (such as jaas.conf)
+<span class="nc" id="L309">            saslState = SaslState.FAILED;</span>
+<span class="nc" id="L310">            throw new SaslException(&quot;Error in authenticating with a Zookeeper Quorum member: the quorum member's saslToken is null.&quot;);</span>
+        }
+
+<span class="nc" id="L313">        Subject subject = login.getSubject();</span>
+<span class="nc bnc" id="L314" title="All 2 branches missed.">        if (subject != null) {</span>
+<span class="nc" id="L315">            synchronized (login) {</span>
+                try {
+<span class="nc" id="L317">                    final byte[] retval = Subject.doAs(subject, new PrivilegedExceptionAction&lt;byte[]&gt;() {</span>
+                        public byte[] run() throws SaslException {
+<span class="nc" id="L319">                            LOG.debug(&quot;saslClient.evaluateChallenge(len={})&quot;, saslToken.length);</span>
+<span class="nc" id="L320">                            return saslClient.evaluateChallenge(saslToken);</span>
+                        }
+                    });
+<span class="nc" id="L323">                    return retval;</span>
+<span class="nc" id="L324">                } catch (PrivilegedActionException e) {</span>
+<span class="nc" id="L325">                    String error = &quot;An error: (&quot; + e + &quot;) occurred when evaluating Zookeeper Quorum Member's &quot;</span>
+                                   + &quot; received SASL token.&quot;;
+                    // Try to provide hints to use about what went wrong so they can fix their configuration.
+                    // TODO: introspect about e: look for GSS information.
+<span class="nc" id="L329">                    final String UNKNOWN_SERVER_ERROR_TEXT = &quot;(Mechanism level: Server not found in Kerberos database (7) - UNKNOWN_SERVER)&quot;;</span>
+<span class="nc bnc" id="L330" title="All 2 branches missed.">                    if (e.toString().contains(UNKNOWN_SERVER_ERROR_TEXT)) {</span>
+<span class="nc" id="L331">                        error += &quot; This may be caused by Java's being unable to resolve the Zookeeper Quorum Member's&quot;</span>
+                                 + &quot; hostname correctly. You may want to try to adding&quot;
+                                 + &quot; '-Dsun.net.spi.nameservice.provider.1=dns,sun' to your client's JVMFLAGS environment.&quot;;
+                    }
+<span class="nc" id="L335">                    error += &quot; Zookeeper Client will go to AUTH_FAILED state.&quot;;</span>
+<span class="nc" id="L336">                    LOG.error(error);</span>
+<span class="nc" id="L337">                    saslState = SaslState.FAILED;</span>
+<span class="nc" id="L338">                    throw new SaslException(error, e);</span>
+                }
+            }
+        } else {
+<span class="nc" id="L342">            throw new SaslException(&quot;Cannot make SASL token without subject defined. &quot;</span>
+                                    + &quot;For diagnosis, please look for WARNs and ERRORs in your log related to the Login class.&quot;);
+        }
+    }
+
+    private void sendSaslPacket(byte[] saslToken, ClientCnxn cnxn) throws SaslException {
+<span class="nc" id="L348">        LOG.debug(&quot;ClientCnxn:sendSaslPacket:length={}&quot;, saslToken.length);</span>
+
+<span class="nc" id="L350">        GetSASLRequest request = new GetSASLRequest();</span>
+<span class="nc" id="L351">        request.setToken(saslToken);</span>
+<span class="nc" id="L352">        SetSASLResponse response = new SetSASLResponse();</span>
+<span class="nc" id="L353">        ServerSaslResponseCallback cb = new ServerSaslResponseCallback();</span>
+
+        try {
+<span class="nc" id="L356">            cnxn.sendPacket(request, response, cb, ZooDefs.OpCode.sasl);</span>
+<span class="nc" id="L357">        } catch (IOException e) {</span>
+<span class="nc" id="L358">            throw new SaslException(&quot;Failed to send SASL packet to server.&quot;, e);</span>
+<span class="nc" id="L359">        }</span>
+<span class="nc" id="L360">    }</span>
+
+    private void sendSaslPacket(ClientCnxn cnxn) throws SaslException {
+<span class="nc" id="L363">        LOG.debug(&quot;ClientCnxn:sendSaslPacket:length={}&quot;, saslToken.length);</span>
+
+<span class="nc" id="L365">        GetSASLRequest request = new GetSASLRequest();</span>
+<span class="nc" id="L366">        request.setToken(createSaslToken());</span>
+<span class="nc" id="L367">        SetSASLResponse response = new SetSASLResponse();</span>
+<span class="nc" id="L368">        ServerSaslResponseCallback cb = new ServerSaslResponseCallback();</span>
+        try {
+<span class="nc" id="L370">            cnxn.sendPacket(request, response, cb, ZooDefs.OpCode.sasl);</span>
+<span class="nc" id="L371">        } catch (IOException e) {</span>
+<span class="nc" id="L372">            throw new SaslException(&quot;Failed to send SASL packet to server due &quot; + &quot;to IOException:&quot;, e);</span>
+<span class="nc" id="L373">        }</span>
+<span class="nc" id="L374">    }</span>
+
+    // used by ClientCnxn to know whether to emit a SASL-related event: either AuthFailed or SaslAuthenticated,
+    // or none, if not ready yet. Sets saslState to COMPLETE as a side-effect.
+    public KeeperState getKeeperState() {
+<span class="nc bnc" id="L379" title="All 2 branches missed.">        if (saslClient != null) {</span>
+<span class="nc bnc" id="L380" title="All 2 branches missed.">            if (saslState == SaslState.FAILED) {</span>
+<span class="nc" id="L381">                return KeeperState.AuthFailed;</span>
+            }
+<span class="nc bnc" id="L383" title="All 2 branches missed.">            if (saslClient.isComplete()) {</span>
+<span class="nc bnc" id="L384" title="All 2 branches missed.">                if (saslState == SaslState.INTERMEDIATE) {</span>
+<span class="nc" id="L385">                    saslState = SaslState.COMPLETE;</span>
+<span class="nc" id="L386">                    return KeeperState.SaslAuthenticated;</span>
+                }
+            }
+        }
+        // No event ready to emit yet.
+<span class="nc" id="L391">        return null;</span>
+    }
+
+    // Initialize the client's communications with the Zookeeper server by sending the server the first
+    // authentication packet.
+    public void initialize(ClientCnxn cnxn) throws SaslException {
+<span class="nc bnc" id="L397" title="All 2 branches missed.">        if (saslClient == null) {</span>
+<span class="nc" id="L398">            saslState = SaslState.FAILED;</span>
+<span class="nc" id="L399">            throw new SaslException(&quot;saslClient failed to initialize properly: it's null.&quot;);</span>
+        }
+<span class="nc bnc" id="L401" title="All 2 branches missed.">        if (saslState == SaslState.INITIAL) {</span>
+<span class="nc bnc" id="L402" title="All 2 branches missed.">            if (saslClient.hasInitialResponse()) {</span>
+<span class="nc" id="L403">                sendSaslPacket(cnxn);</span>
+            } else {
+<span class="nc" id="L405">                byte[] emptyToken = new byte[0];</span>
+<span class="nc" id="L406">                sendSaslPacket(emptyToken, cnxn);</span>
+            }
+<span class="nc" id="L408">            saslState = SaslState.INTERMEDIATE;</span>
+        }
+<span class="nc" id="L410">    }</span>
+
+    public boolean clientTunneledAuthenticationInProgress() {
+<span class="nc bnc" id="L413" title="All 2 branches missed.">        if (!isSASLConfigured) {</span>
+<span class="nc" id="L414">            return false;</span>
+        }
+        // TODO: Rather than checking a disjunction here, should be a single member
+        // variable or method in this class to determine whether the client is
+        // configured to use SASL. (see also ZOOKEEPER-1455).
+        try {
+<span class="nc bnc" id="L420" title="All 2 branches missed.">            if ((clientConfig.getJaasConfKey() != null)</span>
+<span class="nc bnc" id="L421" title="All 2 branches missed.">                || ((Configuration.getConfiguration() != null)</span>
+<span class="nc bnc" id="L422" title="All 2 branches missed.">                    &amp;&amp; (Configuration.getConfiguration().getAppConfigurationEntry(</span>
+<span class="nc" id="L423">                clientConfig.getProperty(</span>
+                    ZKClientConfig.LOGIN_CONTEXT_NAME_KEY,
+                    ZKClientConfig.LOGIN_CONTEXT_NAME_KEY_DEFAULT)) != null))) {
+                // Client is configured to use a valid login Configuration, so
+                // authentication is either in progress, successful, or failed.
+
+                // 1. Authentication hasn't finished yet: we must wait for it to do so.
+<span class="nc bnc" id="L430" title="All 4 branches missed.">                if (!isComplete() &amp;&amp; !isFailed()) {</span>
+<span class="nc" id="L431">                    return true;</span>
+                }
+
+                // 2. SASL authentication has succeeded or failed..
+                //noinspection RedundantIfStatement
+<span class="nc bnc" id="L436" title="All 2 branches missed.">                if (!gotLastPacket) {</span>
+                    // ..but still in progress, because there is a final SASL
+                    // message from server which must be received.
+<span class="nc" id="L439">                    return true;</span>
+                }
+            }
+            // Either client is not configured to use a tunnelled authentication
+            // scheme, or tunnelled authentication has completed (successfully or
+            // not), and all server SASL messages have been received.
+<span class="nc" id="L445">            return false;</span>
+<span class="nc" id="L446">        } catch (SecurityException e) {</span>
+            // Thrown if the caller does not have permission to retrieve the Configuration.
+            // In this case, simply returning false is correct.
+<span class="nc" id="L449">            LOG.debug(&quot;Could not retrieve login configuration&quot;, e);</span>
+
+<span class="nc" id="L451">            return false;</span>
+        }
+    }
+
+    /**
+     * close login thread if running
+     */
+    public void shutdown() {
+<span class="nc bnc" id="L459" title="All 2 branches missed.">        if (null != login) {</span>
+<span class="nc" id="L460">            login.shutdown();</span>
+        }
+<span class="nc" id="L462">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

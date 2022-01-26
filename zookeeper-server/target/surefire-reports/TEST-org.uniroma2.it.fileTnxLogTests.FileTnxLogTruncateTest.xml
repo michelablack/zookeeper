@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0.821" tests="6" errors="0" skipped="0" failures="0">
+  <properties>
+    <property name="sun.desktop" value="gnome"/>
+    <property name="awt.toolkit" value="sun.awt.X11.XToolkit"/>
+    <property name="java.specification.version" value="11"/>
+    <property name="sun.cpu.isalist" value=""/>
+    <property name="sun.jnu.encoding" value="UTF-8"/>
+    <property name="java.class.path" value="/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/test-classes:/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/classes:/home/michelablack/.m2/repository/org/assertj/assertj-core/3.15.0/assertj-core-3.15.0.jar:/home/michelablack/.m2/repository/ch/qos/logback/logback-classic/1.2.6/logback-classic-1.2.6.jar:/home/michelablack/.m2/repository/ch/qos/logback/logback-core/1.2.6/logback-core-1.2.6.jar:/home/michelablack/.m2/repository/com/github/spotbugs/spotbugs-annotations/4.0.2/spotbugs-annotations-4.0.2.jar:/home/michelablack/.m2/repository/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest-library/2.2/hamcrest-library-2.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest-core/2.2/hamcrest-core-2.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest/2.2/hamcrest-2.2.jar:/home/michelablack/.m2/repository/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar:/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-jute/target/classes:/home/michelablack/.m2/repository/commons-cli/commons-cli/1.4/commons-cli-1.4.jar:/home/michelablack/.m2/repository/org/apache/yetus/audience-annotations/0.12.0/audience-annotations-0.12.0.jar:/home/michelablack/.m2/repository/io/netty/netty-handler/4.1.63.Final/netty-handler-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-common/4.1.63.Final/netty-common-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-resolver/4.1.63.Final/netty-resolver-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-buffer/4.1.63.Final/netty-buffer-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport/4.1.63.Final/netty-transport-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-codec/4.1.63.Final/netty-codec-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport-native-epoll/4.1.63.Final/netty-transport-native-epoll-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport-native-unix-common/4.1.63.Final/netty-transport-native-unix-common-4.1.63.Final.jar:/home/michelablack/.m2/repository/org/slf4j/slf4j-api/1.7.30/slf4j-api-1.7.30.jar:/home/michelablack/.m2/repository/org/slf4j/slf4j-log4j12/1.7.30/slf4j-log4j12-1.7.30.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-server/9.4.39.v20210325/jetty-server-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/javax/servlet/javax.servlet-api/3.1.0/javax.servlet-api-3.1.0.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-http/9.4.39.v20210325/jetty-http-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-util/9.4.39.v20210325/jetty-util-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-io/9.4.39.v20210325/jetty-io-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-servlet/9.4.39.v20210325/jetty-servlet-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-security/9.4.39.v20210325/jetty-security-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-util-ajax/9.4.39.v20210325/jetty-util-ajax-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-client/9.4.39.v20210325/jetty-client-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.10.5.1/jackson-databind-2.10.5.1.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.10.5/jackson-annotations-2.10.5.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.10.5/jackson-core-2.10.5.jar:/home/michelablack/.m2/repository/org/bouncycastle/bcprov-jdk15on/1.60/bcprov-jdk15on-1.60.jar:/home/michelablack/.m2/repository/org/bouncycastle/bcpkix-jdk15on/1.60/bcpkix-jdk15on-1.60.jar:/home/michelablack/.m2/repository/jline/jline/2.14.6/jline-2.14.6.jar:/home/michelablack/.m2/repository/io/dropwizard/metrics/metrics-core/4.1.12.1/metrics-core-4.1.12.1.jar:/home/michelablack/.m2/repository/log4j/log4j/1.2.17/log4j-1.2.17.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-core/2.0.0/kerb-core-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-pkix/2.0.0/kerby-pkix-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-asn1/2.0.0/kerby-asn1-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-util/2.0.0/kerby-util-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-simplekdc/2.0.0/kerb-simplekdc-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-client/2.0.0/kerb-client-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-common/2.0.0/kerb-common-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-crypto/2.0.0/kerb-crypto-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-util/2.0.0/kerb-util-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/token-provider/2.0.0/token-provider-2.0.0.jar:/home/michelablack/.m2/repository/com/nimbusds/nimbus-jose-jwt/4.41.2/nimbus-jose-jwt-4.41.2.jar:/home/michelablack/.m2/repository/com/github/stephenc/jcip/jcip-annotations/1.0-1/jcip-annotations-1.0-1.jar:/home/michelablack/.m2/repository/net/minidev/json-smart/2.3/json-smart-2.3.jar:/home/michelablack/.m2/repository/net/minidev/accessors-smart/1.2/accessors-smart-1.2.jar:/home/michelablack/.m2/repository/org/ow2/asm/asm/5.0.4/asm-5.0.4.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-admin/2.0.0/kerb-admin-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-server/2.0.0/kerb-server-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-identity/2.0.0/kerb-identity-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-xdr/2.0.0/kerby-xdr-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-config/2.0.0/kerby-config-2.0.0.jar:/home/michelablack/.m2/repository/org/mockito/mockito-core/3.6.28/mockito-core-3.6.28.jar:/home/michelablack/.m2/repository/net/bytebuddy/byte-buddy/1.10.18/byte-buddy-1.10.18.jar:/home/michelablack/.m2/repository/net/bytebuddy/byte-buddy-agent/1.10.18/byte-buddy-agent-1.10.18.jar:/home/michelablack/.m2/repository/org/objenesis/objenesis/3.1/objenesis-3.1.jar:/home/michelablack/.m2/repository/org/jmockit/jmockit/1.48/jmockit-1.48.jar:/home/michelablack/.m2/repository/org/xerial/snappy/snappy-java/1.1.7.7/snappy-java-1.1.7.7.jar:/home/michelablack/.m2/repository/commons-io/commons-io/2.6/commons-io-2.6.jar:/home/michelablack/.m2/repository/junit/junit/4.12/junit-4.12.jar:"/>
+    <property name="java.vm.vendor" value="Ubuntu"/>
+    <property name="sun.arch.data.model" value="64"/>
+    <property name="java.vendor.url" value="https://ubuntu.com/"/>
+    <property name="user.timezone" value=""/>
+    <property name="java.vm.specification.version" value="11"/>
+    <property name="os.name" value="Linux"/>
+    <property name="sun.java.launcher" value="SUN_STANDARD"/>
+    <property name="user.country" value="IT"/>
+    <property name="sun.boot.library.path" value="/usr/lib/jvm/java-11-openjdk-amd64/lib"/>
+    <property name="sun.java.command" value="/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/surefire/surefirebooter229037836071707342.jar /home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/surefire 2022-01-26T22-57-53_525-jvmRun1 surefire7461523008392105224tmp surefire_02698936293671618210tmp"/>
+    <property name="jdk.debug" value="release"/>
+    <property name="surefire.test.class.path" value="/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/test-classes:/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/classes:/home/michelablack/.m2/repository/org/assertj/assertj-core/3.15.0/assertj-core-3.15.0.jar:/home/michelablack/.m2/repository/ch/qos/logback/logback-classic/1.2.6/logback-classic-1.2.6.jar:/home/michelablack/.m2/repository/ch/qos/logback/logback-core/1.2.6/logback-core-1.2.6.jar:/home/michelablack/.m2/repository/com/github/spotbugs/spotbugs-annotations/4.0.2/spotbugs-annotations-4.0.2.jar:/home/michelablack/.m2/repository/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest-library/2.2/hamcrest-library-2.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest-core/2.2/hamcrest-core-2.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest/2.2/hamcrest-2.2.jar:/home/michelablack/.m2/repository/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar:/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-jute/target/classes:/home/michelablack/.m2/repository/commons-cli/commons-cli/1.4/commons-cli-1.4.jar:/home/michelablack/.m2/repository/org/apache/yetus/audience-annotations/0.12.0/audience-annotations-0.12.0.jar:/home/michelablack/.m2/repository/io/netty/netty-handler/4.1.63.Final/netty-handler-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-common/4.1.63.Final/netty-common-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-resolver/4.1.63.Final/netty-resolver-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-buffer/4.1.63.Final/netty-buffer-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport/4.1.63.Final/netty-transport-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-codec/4.1.63.Final/netty-codec-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport-native-epoll/4.1.63.Final/netty-transport-native-epoll-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport-native-unix-common/4.1.63.Final/netty-transport-native-unix-common-4.1.63.Final.jar:/home/michelablack/.m2/repository/org/slf4j/slf4j-api/1.7.30/slf4j-api-1.7.30.jar:/home/michelablack/.m2/repository/org/slf4j/slf4j-log4j12/1.7.30/slf4j-log4j12-1.7.30.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-server/9.4.39.v20210325/jetty-server-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/javax/servlet/javax.servlet-api/3.1.0/javax.servlet-api-3.1.0.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-http/9.4.39.v20210325/jetty-http-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-util/9.4.39.v20210325/jetty-util-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-io/9.4.39.v20210325/jetty-io-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-servlet/9.4.39.v20210325/jetty-servlet-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-security/9.4.39.v20210325/jetty-security-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-util-ajax/9.4.39.v20210325/jetty-util-ajax-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-client/9.4.39.v20210325/jetty-client-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.10.5.1/jackson-databind-2.10.5.1.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.10.5/jackson-annotations-2.10.5.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.10.5/jackson-core-2.10.5.jar:/home/michelablack/.m2/repository/org/bouncycastle/bcprov-jdk15on/1.60/bcprov-jdk15on-1.60.jar:/home/michelablack/.m2/repository/org/bouncycastle/bcpkix-jdk15on/1.60/bcpkix-jdk15on-1.60.jar:/home/michelablack/.m2/repository/jline/jline/2.14.6/jline-2.14.6.jar:/home/michelablack/.m2/repository/io/dropwizard/metrics/metrics-core/4.1.12.1/metrics-core-4.1.12.1.jar:/home/michelablack/.m2/repository/log4j/log4j/1.2.17/log4j-1.2.17.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-core/2.0.0/kerb-core-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-pkix/2.0.0/kerby-pkix-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-asn1/2.0.0/kerby-asn1-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-util/2.0.0/kerby-util-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-simplekdc/2.0.0/kerb-simplekdc-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-client/2.0.0/kerb-client-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-common/2.0.0/kerb-common-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-crypto/2.0.0/kerb-crypto-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-util/2.0.0/kerb-util-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/token-provider/2.0.0/token-provider-2.0.0.jar:/home/michelablack/.m2/repository/com/nimbusds/nimbus-jose-jwt/4.41.2/nimbus-jose-jwt-4.41.2.jar:/home/michelablack/.m2/repository/com/github/stephenc/jcip/jcip-annotations/1.0-1/jcip-annotations-1.0-1.jar:/home/michelablack/.m2/repository/net/minidev/json-smart/2.3/json-smart-2.3.jar:/home/michelablack/.m2/repository/net/minidev/accessors-smart/1.2/accessors-smart-1.2.jar:/home/michelablack/.m2/repository/org/ow2/asm/asm/5.0.4/asm-5.0.4.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-admin/2.0.0/kerb-admin-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-server/2.0.0/kerb-server-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-identity/2.0.0/kerb-identity-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-xdr/2.0.0/kerby-xdr-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-config/2.0.0/kerby-config-2.0.0.jar:/home/michelablack/.m2/repository/org/mockito/mockito-core/3.6.28/mockito-core-3.6.28.jar:/home/michelablack/.m2/repository/net/bytebuddy/byte-buddy/1.10.18/byte-buddy-1.10.18.jar:/home/michelablack/.m2/repository/net/bytebuddy/byte-buddy-agent/1.10.18/byte-buddy-agent-1.10.18.jar:/home/michelablack/.m2/repository/org/objenesis/objenesis/3.1/objenesis-3.1.jar:/home/michelablack/.m2/repository/org/jmockit/jmockit/1.48/jmockit-1.48.jar:/home/michelablack/.m2/repository/org/xerial/snappy/snappy-java/1.1.7.7/snappy-java-1.1.7.7.jar:/home/michelablack/.m2/repository/commons-io/commons-io/2.6/commons-io-2.6.jar:/home/michelablack/.m2/repository/junit/junit/4.12/junit-4.12.jar:"/>
+    <property name="sun.cpu.endian" value="little"/>
+    <property name="user.home" value="/home/michelablack"/>
+    <property name="user.language" value="it"/>
+    <property name="java.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.version.date" value="2021-01-19"/>
+    <property name="java.home" value="/usr/lib/jvm/java-11-openjdk-amd64"/>
+    <property name="file.separator" value="/"/>
+    <property name="basedir" value="/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server"/>
+    <property name="java.vm.compressedOopsMode" value="32-bit"/>
+    <property name="line.separator" value="&#10;"/>
+    <property name="java.specification.name" value="Java Platform API Specification"/>
+    <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
+    <property name="java.awt.graphicsenv" value="sun.awt.X11GraphicsEnvironment"/>
+    <property name="surefire.real.class.path" value="/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/surefire/surefirebooter229037836071707342.jar"/>
+    <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
+    <property name="java.runtime.version" value="11.0.10+9-Ubuntu-0ubuntu1.20.04"/>
+    <property name="user.name" value="michelablack"/>
+    <property name="java.net.preferIPv4Stack" value="true"/>
+    <property name="path.separator" value=":"/>
+    <property name="os.version" value="5.4.0-66-generic"/>
+    <property name="java.runtime.name" value="OpenJDK Runtime Environment"/>
+    <property name="file.encoding" value="UTF-8"/>
+    <property name="java.vm.name" value="OpenJDK 64-Bit Server VM"/>
+    <property name="localRepository" value="/home/michelablack/.m2/repository"/>
+    <property name="coverage" value="true"/>
+    <property name="java.vendor.url.bug" value="https://bugs.launchpad.net/ubuntu/+source/openjdk-lts"/>
+    <property name="java.io.tmpdir" value="/tmp"/>
+    <property name="idea.version" value="2020.3.3"/>
+    <property name="java.version" value="11.0.10"/>
+    <property name="user.dir" value="/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server"/>
+    <property name="os.arch" value="amd64"/>
+    <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
+    <property name="java.awt.printerjob" value="sun.print.PSPrinterJob"/>
+    <property name="sun.os.patch.level" value="unknown"/>
+    <property name="java.library.path" value="/usr/java/packages/lib:/usr/lib/x86_64-linux-gnu/jni:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/jni:/lib:/usr/lib"/>
+    <property name="java.vm.info" value="mixed mode, sharing"/>
+    <property name="java.vendor" value="Ubuntu"/>
+    <property name="java.vm.version" value="11.0.10+9-Ubuntu-0ubuntu1.20.04"/>
+    <property name="sun.io.unicode.encoding" value="UnicodeLittle"/>
+    <property name="java.class.version" value="55.0"/>
+  </properties>
+  <testcase name="deleteAndTruncate[0]" classname="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0.15">
+    <system-out><![CDATA[22:58:02.895 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.1
+22:58:02.908 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.2
+22:58:02.986 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:02.988 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+22:58:03.045 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - 
+22:58:03.045 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -   ______                  _                                          
+22:58:03.045 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -  |___  /                 | |                                         
+22:58:03.045 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -     / /    ___     ___   | | __   ___    ___   _ __     ___   _ __   
+22:58:03.046 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -    / /    / _ \   / _ \  | |/ /  / _ \  / _ \ | '_ \   / _ \ | '__|
+22:58:03.046 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -   / /__  | (_) | | (_) | |   <  |  __/ |  __/ | |_) | |  __/ | |    
+22:58:03.046 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -  /_____|  \___/   \___/  |_|\_\  \___|  \___| | .__/   \___| |_|
+22:58:03.047 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -                                               | |                     
+22:58:03.047 [main] INFO org.apache.zookeeper.server.ZooKeeperServer -                                               |_|                     
+22:58:03.047 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - 
+22:58:03.052 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:zookeeper.version=3.8.0-SNAPSHOT-3635d202198d7b29f25352f31d0bdf41e6d1ae33-dirty, built on 2022-01-26 21:57 UTC
+22:58:03.052 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:host.name=michelablack-VirtualBox
+22:58:03.052 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.version=11.0.10
+22:58:03.053 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.vendor=Ubuntu
+22:58:03.053 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.home=/usr/lib/jvm/java-11-openjdk-amd64
+22:58:03.053 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.class.path=/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/test-classes:/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server/target/classes:/home/michelablack/.m2/repository/org/assertj/assertj-core/3.15.0/assertj-core-3.15.0.jar:/home/michelablack/.m2/repository/ch/qos/logback/logback-classic/1.2.6/logback-classic-1.2.6.jar:/home/michelablack/.m2/repository/ch/qos/logback/logback-core/1.2.6/logback-core-1.2.6.jar:/home/michelablack/.m2/repository/com/github/spotbugs/spotbugs-annotations/4.0.2/spotbugs-annotations-4.0.2.jar:/home/michelablack/.m2/repository/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest-library/2.2/hamcrest-library-2.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest-core/2.2/hamcrest-core-2.2.jar:/home/michelablack/.m2/repository/org/hamcrest/hamcrest/2.2/hamcrest-2.2.jar:/home/michelablack/.m2/repository/org/apache/commons/commons-collections4/4.4/commons-collections4-4.4.jar:/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-jute/target/classes:/home/michelablack/.m2/repository/commons-cli/commons-cli/1.4/commons-cli-1.4.jar:/home/michelablack/.m2/repository/org/apache/yetus/audience-annotations/0.12.0/audience-annotations-0.12.0.jar:/home/michelablack/.m2/repository/io/netty/netty-handler/4.1.63.Final/netty-handler-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-common/4.1.63.Final/netty-common-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-resolver/4.1.63.Final/netty-resolver-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-buffer/4.1.63.Final/netty-buffer-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport/4.1.63.Final/netty-transport-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-codec/4.1.63.Final/netty-codec-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport-native-epoll/4.1.63.Final/netty-transport-native-epoll-4.1.63.Final.jar:/home/michelablack/.m2/repository/io/netty/netty-transport-native-unix-common/4.1.63.Final/netty-transport-native-unix-common-4.1.63.Final.jar:/home/michelablack/.m2/repository/org/slf4j/slf4j-api/1.7.30/slf4j-api-1.7.30.jar:/home/michelablack/.m2/repository/org/slf4j/slf4j-log4j12/1.7.30/slf4j-log4j12-1.7.30.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-server/9.4.39.v20210325/jetty-server-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/javax/servlet/javax.servlet-api/3.1.0/javax.servlet-api-3.1.0.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-http/9.4.39.v20210325/jetty-http-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-util/9.4.39.v20210325/jetty-util-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-io/9.4.39.v20210325/jetty-io-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-servlet/9.4.39.v20210325/jetty-servlet-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-security/9.4.39.v20210325/jetty-security-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-util-ajax/9.4.39.v20210325/jetty-util-ajax-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/org/eclipse/jetty/jetty-client/9.4.39.v20210325/jetty-client-9.4.39.v20210325.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.10.5.1/jackson-databind-2.10.5.1.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.10.5/jackson-annotations-2.10.5.jar:/home/michelablack/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.10.5/jackson-core-2.10.5.jar:/home/michelablack/.m2/repository/org/bouncycastle/bcprov-jdk15on/1.60/bcprov-jdk15on-1.60.jar:/home/michelablack/.m2/repository/org/bouncycastle/bcpkix-jdk15on/1.60/bcpkix-jdk15on-1.60.jar:/home/michelablack/.m2/repository/jline/jline/2.14.6/jline-2.14.6.jar:/home/michelablack/.m2/repository/io/dropwizard/metrics/metrics-core/4.1.12.1/metrics-core-4.1.12.1.jar:/home/michelablack/.m2/repository/log4j/log4j/1.2.17/log4j-1.2.17.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-core/2.0.0/kerb-core-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-pkix/2.0.0/kerby-pkix-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-asn1/2.0.0/kerby-asn1-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-util/2.0.0/kerby-util-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-simplekdc/2.0.0/kerb-simplekdc-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-client/2.0.0/kerb-client-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-common/2.0.0/kerb-common-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-crypto/2.0.0/kerb-crypto-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-util/2.0.0/kerb-util-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/token-provider/2.0.0/token-provider-2.0.0.jar:/home/michelablack/.m2/repository/com/nimbusds/nimbus-jose-jwt/4.41.2/nimbus-jose-jwt-4.41.2.jar:/home/michelablack/.m2/repository/com/github/stephenc/jcip/jcip-annotations/1.0-1/jcip-annotations-1.0-1.jar:/home/michelablack/.m2/repository/net/minidev/json-smart/2.3/json-smart-2.3.jar:/home/michelablack/.m2/repository/net/minidev/accessors-smart/1.2/accessors-smart-1.2.jar:/home/michelablack/.m2/repository/org/ow2/asm/asm/5.0.4/asm-5.0.4.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-admin/2.0.0/kerb-admin-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-server/2.0.0/kerb-server-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerb-identity/2.0.0/kerb-identity-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-xdr/2.0.0/kerby-xdr-2.0.0.jar:/home/michelablack/.m2/repository/org/apache/kerby/kerby-config/2.0.0/kerby-config-2.0.0.jar:/home/michelablack/.m2/repository/org/mockito/mockito-core/3.6.28/mockito-core-3.6.28.jar:/home/michelablack/.m2/repository/net/bytebuddy/byte-buddy/1.10.18/byte-buddy-1.10.18.jar:/home/michelablack/.m2/repository/net/bytebuddy/byte-buddy-agent/1.10.18/byte-buddy-agent-1.10.18.jar:/home/michelablack/.m2/repository/org/objenesis/objenesis/3.1/objenesis-3.1.jar:/home/michelablack/.m2/repository/org/jmockit/jmockit/1.48/jmockit-1.48.jar:/home/michelablack/.m2/repository/org/xerial/snappy/snappy-java/1.1.7.7/snappy-java-1.1.7.7.jar:/home/michelablack/.m2/repository/commons-io/commons-io/2.6/commons-io-2.6.jar:/home/michelablack/.m2/repository/junit/junit/4.12/junit-4.12.jar:
+22:58:03.059 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.library.path=/usr/java/packages/lib:/usr/lib/x86_64-linux-gnu/jni:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib/jni:/lib:/usr/lib
+22:58:03.060 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.io.tmpdir=/tmp
+22:58:03.067 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:java.compiler=<NA>
+22:58:03.067 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:os.name=Linux
+22:58:03.068 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:os.arch=amd64
+22:58:03.068 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:os.version=5.4.0-66-generic
+22:58:03.068 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:user.name=michelablack
+22:58:03.068 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:user.home=/home/michelablack
+22:58:03.069 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:user.dir=/home/michelablack/Scrivania/zookeeper-isw2/zookeeper-server
+22:58:03.069 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:os.memory.free=67MB
+22:58:03.069 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:os.memory.max=2048MB
+22:58:03.069 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - Server environment:os.memory.total=78MB
+22:58:03.070 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.enableEagerACLCheck = false
+22:58:03.070 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.digest.enabled = true
+22:58:03.070 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.closeSessionTxn.enabled = true
+22:58:03.070 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.flushDelay = 0 ms
+22:58:03.071 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.maxWriteQueuePollTime = 0 ms
+22:58:03.071 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.maxBatchSize=1000
+22:58:03.071 [main] INFO org.apache.zookeeper.server.ZooKeeperServer - zookeeper.intBufferStartingSizeBytes = 1024
+]]></system-out>
+    <system-err><![CDATA[SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: Found binding in [jar:file:/home/michelablack/.m2/repository/ch/qos/logback/logback-classic/1.2.6/logback-classic-1.2.6.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: Found binding in [jar:file:/home/michelablack/.m2/repository/org/slf4j/slf4j-log4j12/1.7.30/slf4j-log4j12-1.7.30.jar!/org/slf4j/impl/StaticLoggerBinder.class]
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [ch.qos.logback.classic.util.ContextSelectorStaticBinder]
+java.io.IOException: No log files found to truncate! This could happen if you still have snapshots from an old setup or log files were deleted accidentally or dataLogDir was changed in zoo.cfg.
+	at org.apache.zookeeper.server.persistence.FileTxnLog.truncate(FileTxnLog.java:457)
+	at org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest.deleteAndTruncate(FileTnxLogTruncateTest.java:92)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:566)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:50)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:47)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunAfters.evaluate(RunAfters.java:27)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:325)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:78)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:57)
+	at org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:71)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:288)
+	at org.junit.runners.ParentRunner.access$000(ParentRunner.java:58)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:268)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:363)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:71)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:288)
+	at org.junit.runners.ParentRunner.access$000(ParentRunner.java:58)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:268)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:363)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.execute(JUnit4Provider.java:364)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.executeWithRerun(JUnit4Provider.java:272)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.executeTestSet(JUnit4Provider.java:237)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.invoke(JUnit4Provider.java:158)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:428)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:562)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:548)
+]]></system-err>
+  </testcase>
+  <testcase name="truncate[0]" classname="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0">
+    <system-out><![CDATA[22:58:03.100 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.1
+22:58:03.100 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.2
+22:58:03.109 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.109 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+22:58:03.110 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.110 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+]]></system-out>
+  </testcase>
+  <testcase name="deleteAndTruncate[1]" classname="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0.01">
+    <system-out><![CDATA[22:58:03.111 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.1
+22:58:03.111 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.2
+22:58:03.115 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.115 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+]]></system-out>
+    <system-err><![CDATA[java.io.IOException: No log files found to truncate! This could happen if you still have snapshots from an old setup or log files were deleted accidentally or dataLogDir was changed in zoo.cfg.
+	at org.apache.zookeeper.server.persistence.FileTxnLog.truncate(FileTxnLog.java:457)
+	at org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest.deleteAndTruncate(FileTnxLogTruncateTest.java:92)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:566)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:50)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:47)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunAfters.evaluate(RunAfters.java:27)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:325)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:78)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:57)
+	at org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:71)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:288)
+	at org.junit.runners.ParentRunner.access$000(ParentRunner.java:58)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:268)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:363)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:71)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:288)
+	at org.junit.runners.ParentRunner.access$000(ParentRunner.java:58)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:268)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:363)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.execute(JUnit4Provider.java:364)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.executeWithRerun(JUnit4Provider.java:272)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.executeTestSet(JUnit4Provider.java:237)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.invoke(JUnit4Provider.java:158)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:428)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:562)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:548)
+]]></system-err>
+  </testcase>
+  <testcase name="truncate[1]" classname="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0.001">
+    <system-out><![CDATA[22:58:03.118 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.1
+22:58:03.119 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.2
+22:58:03.134 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.134 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+22:58:03.134 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.134 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+]]></system-out>
+  </testcase>
+  <testcase name="deleteAndTruncate[2]" classname="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0.007">
+    <system-out><![CDATA[22:58:03.135 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.1
+22:58:03.135 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.2
+22:58:03.141 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.141 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+]]></system-out>
+    <system-err><![CDATA[java.io.IOException: No log files found to truncate! This could happen if you still have snapshots from an old setup or log files were deleted accidentally or dataLogDir was changed in zoo.cfg.
+	at org.apache.zookeeper.server.persistence.FileTxnLog.truncate(FileTxnLog.java:457)
+	at org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest.deleteAndTruncate(FileTnxLogTruncateTest.java:92)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:566)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:50)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:47)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunAfters.evaluate(RunAfters.java:27)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:325)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:78)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:57)
+	at org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:71)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:288)
+	at org.junit.runners.ParentRunner.access$000(ParentRunner.java:58)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:268)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:363)
+	at org.junit.runners.Suite.runChild(Suite.java:128)
+	at org.junit.runners.Suite.runChild(Suite.java:27)
+	at org.junit.runners.ParentRunner$3.run(ParentRunner.java:290)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:71)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:288)
+	at org.junit.runners.ParentRunner.access$000(ParentRunner.java:58)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:268)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:363)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.execute(JUnit4Provider.java:364)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.executeWithRerun(JUnit4Provider.java:272)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.executeTestSet(JUnit4Provider.java:237)
+	at org.apache.maven.surefire.junit4.JUnit4Provider.invoke(JUnit4Provider.java:158)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:428)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:562)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:548)
+]]></system-err>
+  </testcase>
+  <testcase name="truncate[2]" classname="org.uniroma2.it.fileTnxLogTests.FileTnxLogTruncateTest" time="0.002">
+    <system-out><![CDATA[22:58:03.143 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.1
+22:58:03.143 [main] INFO org.apache.zookeeper.server.persistence.FileTxnLog - Creating new log file: log.2
+22:58:03.149 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.149 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+22:58:03.150 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input stream: log_dir/log.1
+22:58:03.150 [main] DEBUG org.apache.zookeeper.server.persistence.FileTxnLog - Created new input archive: log_dir/log.1
+]]></system-out>
+  </testcase>
+</testsuite>

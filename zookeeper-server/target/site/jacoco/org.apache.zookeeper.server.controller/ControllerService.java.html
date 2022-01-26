@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ControllerService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.controller</a> &gt; <span class="el_source">ControllerService.java</span></div><h1>ControllerService.java</h1><pre class="source lang-java linenums">/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * &lt;p&gt;
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * &lt;p&gt;
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.controller;
+
+import java.io.IOException;
+import org.apache.zookeeper.server.ExitCode;
+import org.apache.zookeeper.server.ServerCnxnFactory;
+import org.apache.zookeeper.server.quorum.QuorumPeer;
+import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
+import org.apache.zookeeper.util.ServiceUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Main class which starts a ZooKeeperServer, a ZooKeeperServerController and the ControllerService.
+ * Tests should either invoke this class as the main target of a new JVM process OR explicitly
+ * start and stop a singleton of this class in their test process.
+ */
+<span class="nc" id="L35">public class ControllerService {</span>
+<span class="nc" id="L36">    private static final Logger LOG = LoggerFactory.getLogger(ControllerService.class);</span>
+
+    private ZooKeeperServerController controller;
+    private CommandListener listener;
+
+    protected QuorumPeerConfig config;
+<span class="nc" id="L42">    private ServerCnxnFactory serverCnxnFactory = null;</span>
+<span class="nc" id="L43">    protected QuorumPeer quorumPeer = null;</span>
+
+    /**
+     * Starts the ControllerService as a stand alone app. Useful for out of process testing
+     * - such as during integration testing.
+     */
+    public static void main(String[] args) {
+        ControllerServerConfig config;
+        try {
+<span class="nc bnc" id="L52" title="All 2 branches missed.">            if (args.length != 1) {</span>
+<span class="nc" id="L53">                throw new IllegalArgumentException(&quot;Require config file as cmd line argument&quot;);</span>
+            } else {
+<span class="nc" id="L55">                config = new ControllerServerConfig(args[0]);</span>
+            }
+<span class="nc" id="L57">            new ControllerService().start(config);</span>
+<span class="nc" id="L58">        } catch (Exception ex) {</span>
+<span class="nc" id="L59">            System.err.println(ex.getMessage());</span>
+<span class="nc" id="L60">            System.err.println(&quot;Usage: TestControllerMain controller-port configfile&quot;);</span>
+<span class="nc" id="L61">            ServiceUtils.requestSystemExit(ExitCode.UNEXPECTED_ERROR.getValue());</span>
+<span class="nc" id="L62">        }</span>
+<span class="nc" id="L63">    }</span>
+
+    /**
+     * Starts a new thread to run the controller (useful when this service is hosted in process
+     * - such as during unit testing).
+     */
+    public Thread start(ControllerServerConfig controllerConfig) {
+<span class="nc" id="L70">        this.config = controllerConfig;</span>
+<span class="nc" id="L71">        final ControllerService svc = this;</span>
+
+<span class="nc" id="L73">        Thread runner = new Thread(() -&gt; {</span>
+            try {
+<span class="nc" id="L75">                svc.run();</span>
+<span class="nc" id="L76">            } catch (Exception e) {</span>
+<span class="nc" id="L77">            }</span>
+<span class="nc" id="L78">        });</span>
+<span class="nc" id="L79">        runner.setDaemon(true);</span>
+<span class="nc" id="L80">        runner.start();</span>
+<span class="nc" id="L81">        return runner;</span>
+    }
+
+    public synchronized void shutdown() {
+<span class="nc bnc" id="L85" title="All 2 branches missed.">        if (listener != null) {</span>
+<span class="nc" id="L86">            listener.close();</span>
+<span class="nc" id="L87">            listener = null;</span>
+        }
+
+<span class="nc bnc" id="L90" title="All 2 branches missed.">        if (controller != null) {</span>
+<span class="nc" id="L91">            controller.shutdown();</span>
+<span class="nc" id="L92">            controller = null;</span>
+        }
+<span class="nc" id="L94">    }</span>
+
+    /**
+     * Initializes an instance of the ZooKeeperServer, the ZooKeeperServerController, and a new
+     * Http listener (CommandListener) for the controller.
+     */
+    protected void initService() throws IOException {
+<span class="nc" id="L101">        ControllerServerConfig controllerConfig = (ControllerServerConfig) config;</span>
+<span class="nc" id="L102">        controllerConfig.ensureComplete();</span>
+<span class="nc" id="L103">        this.controller = new ZooKeeperServerController(controllerConfig);</span>
+<span class="nc" id="L104">        this.listener = new CommandListener(controller, controllerConfig);</span>
+<span class="nc" id="L105">        this.serverCnxnFactory = controller.getCnxnFactory();</span>
+<span class="nc" id="L106">    }</span>
+
+    protected void runServices() {
+<span class="nc" id="L109">        this.controller.run();</span>
+<span class="nc" id="L110">    }</span>
+
+    protected void cleanup() {
+<span class="nc bnc" id="L113" title="All 2 branches missed.">        if (listener != null) {</span>
+<span class="nc" id="L114">            listener.close();</span>
+<span class="nc" id="L115">            listener = null;</span>
+        }
+<span class="nc" id="L117">    }</span>
+
+    /**
+     * Runs the main loop for this application but does not exit the process.
+     */
+    public void initializeAndRun(String[] args) throws QuorumPeerConfig.ConfigException {
+<span class="nc" id="L123">        initConfig(args);</span>
+<span class="nc" id="L124">        run();</span>
+<span class="nc" id="L125">    }</span>
+
+    /**
+     * Derived classes may override to do custom initialization of command line args.
+     */
+    protected void initConfig(String[] args) throws QuorumPeerConfig.ConfigException {
+<span class="nc bnc" id="L131" title="All 2 branches missed.">        if (args.length == 1) {</span>
+<span class="nc" id="L132">            config.parse(args[0]);</span>
+        }
+<span class="nc" id="L134">    }</span>
+
+    /**
+     * Run the app given a QuorumPeerConfig.
+     *
+     * @param config The quorum peer config.
+     */
+    public void runFromConfig(QuorumPeerConfig config) {
+<span class="nc" id="L142">        LOG.info(&quot;Starting quorum peer from peer config&quot;);</span>
+<span class="nc" id="L143">        this.config = config;</span>
+<span class="nc" id="L144">        run();</span>
+<span class="nc" id="L145">    }</span>
+
+    protected void run() {
+        try {
+<span class="nc" id="L149">            initService();</span>
+<span class="nc" id="L150">        } catch (Exception ex) {</span>
+<span class="nc" id="L151">            LOG.error(&quot;Failed to start ControllerService.&quot;, ex);</span>
+<span class="nc" id="L152">            ServiceUtils.requestSystemExit(ExitCode.UNEXPECTED_ERROR.getValue());</span>
+
+<span class="nc" id="L154">        }</span>
+<span class="nc" id="L155">        runServices();</span>
+<span class="nc" id="L156">        cleanup();</span>
+<span class="nc" id="L157">    }</span>
+
+    /**
+     * Is the service up with all necessary initialization and port opening complete?
+     *
+     * @return true if the controller service is ready to use; false otherwise.
+     */
+    public boolean isReady() {
+<span class="nc bnc" id="L165" title="All 4 branches missed.">        return controller != null &amp;&amp; controller.isReady();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

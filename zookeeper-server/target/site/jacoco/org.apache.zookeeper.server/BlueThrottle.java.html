@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BlueThrottle.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">BlueThrottle.java</span></div><h1>BlueThrottle.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import java.util.Random;
+import org.apache.zookeeper.common.Time;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Implements a token-bucket based rate limiting mechanism with optional
+ * probabilistic dropping inspired by the BLUE queue management algorithm [1].
+ *
+ * The throttle provides the {@link #checkLimit(int)} method which provides
+ * a binary yes/no decision.
+ *
+ * The core token bucket algorithm starts with an initial set of tokens based
+ * on the &lt;code&gt;maxTokens&lt;/code&gt; setting. Tokens are dispensed each
+ * {@link #checkLimit(int)} call, which fails if there are not enough tokens to
+ * satisfy a given request.
+ *
+ * The token bucket refills over time, providing &lt;code&gt;fillCount&lt;/code&gt; tokens
+ * every &lt;code&gt;fillTime&lt;/code&gt; milliseconds, capping at &lt;code&gt;maxTokens&lt;/code&gt;.
+ *
+ * This design allows the throttle to allow short bursts to pass, while still
+ * capping the total number of requests per time interval.
+ *
+ * One issue with a pure token bucket approach for something like request or
+ * connection throttling is that the wall clock arrival time of requests affects
+ * the probability of a request being allowed to pass or not. Under constant
+ * load this can lead to request starvation for requests that constantly arrive
+ * later than the majority.
+ *
+ * In an attempt to combat this, this throttle can also provide probabilistic
+ * dropping. This is enabled anytime &lt;code&gt;freezeTime&lt;/code&gt; is set to a value
+ * other than &lt;code&gt;-1&lt;/code&gt;.
+ *
+ * The probabilistic algorithm starts with an initial drop probability of 0, and
+ * adjusts this probability roughly every &lt;code&gt;freezeTime&lt;/code&gt; milliseconds.
+ * The first request after &lt;code&gt;freezeTime&lt;/code&gt;, the algorithm checks the
+ * token bucket. If the token bucket is empty, the drop probability is increased
+ * by &lt;code&gt;dropIncrease&lt;/code&gt; up to a maximum of &lt;code&gt;1&lt;/code&gt;. Otherwise, if
+ * the bucket has a token deficit less than &lt;code&gt;decreasePoint * maxTokens&lt;/code&gt;,
+ * the probability is decreased by &lt;code&gt;dropDecrease&lt;/code&gt;.
+ *
+ * Given a call to {@link #checkLimit(int)}, requests are first dropped randomly
+ * based on the current drop probability, and only surviving requests are then
+ * checked against the token bucket.
+ *
+ * When under constant load, the probabilistic algorithm will adapt to a drop
+ * frequency that should keep requests within the token limit. When load drops,
+ * the drop probability will decrease, eventually returning to zero if possible.
+ *
+ * [1] &quot;BLUE: A New Class of Active Queue Management Algorithms&quot;
+ **/
+
+public class BlueThrottle {
+<span class="nc" id="L74">    private static final Logger LOG = LoggerFactory.getLogger(BlueThrottle.class);</span>
+
+    private int maxTokens;
+    private int fillTime;
+    private int fillCount;
+    private int tokens;
+    private long lastTime;
+
+    private int freezeTime;
+    private long lastFreeze;
+    private double dropIncrease;
+    private double dropDecrease;
+    private double decreasePoint;
+    private double drop;
+
+    Random rng;
+
+    public static final String CONNECTION_THROTTLE_TOKENS = &quot;zookeeper.connection_throttle_tokens&quot;;
+    private static final int DEFAULT_CONNECTION_THROTTLE_TOKENS;
+
+    public static final String CONNECTION_THROTTLE_FILL_TIME = &quot;zookeeper.connection_throttle_fill_time&quot;;
+    private static final int DEFAULT_CONNECTION_THROTTLE_FILL_TIME;
+
+    public static final String CONNECTION_THROTTLE_FILL_COUNT = &quot;zookeeper.connection_throttle_fill_count&quot;;
+    private static final int DEFAULT_CONNECTION_THROTTLE_FILL_COUNT;
+
+    public static final String CONNECTION_THROTTLE_FREEZE_TIME = &quot;zookeeper.connection_throttle_freeze_time&quot;;
+    private static final int DEFAULT_CONNECTION_THROTTLE_FREEZE_TIME;
+
+    public static final String CONNECTION_THROTTLE_DROP_INCREASE = &quot;zookeeper.connection_throttle_drop_increase&quot;;
+    private static final double DEFAULT_CONNECTION_THROTTLE_DROP_INCREASE;
+
+    public static final String CONNECTION_THROTTLE_DROP_DECREASE = &quot;zookeeper.connection_throttle_drop_decrease&quot;;
+    private static final double DEFAULT_CONNECTION_THROTTLE_DROP_DECREASE;
+
+    public static final String CONNECTION_THROTTLE_DECREASE_RATIO = &quot;zookeeper.connection_throttle_decrease_ratio&quot;;
+    private static final double DEFAULT_CONNECTION_THROTTLE_DECREASE_RATIO;
+
+    public static final String WEIGHED_CONNECTION_THROTTLE = &quot;zookeeper.connection_throttle_weight_enabled&quot;;
+    private static boolean connectionWeightEnabled;
+
+    public static final String GLOBAL_SESSION_WEIGHT = &quot;zookeeper.connection_throttle_global_session_weight&quot;;
+    private static final int DEFAULT_GLOBAL_SESSION_WEIGHT;
+
+    public static final String LOCAL_SESSION_WEIGHT = &quot;zookeeper.connection_throttle_local_session_weight&quot;;
+    private static final int DEFAULT_LOCAL_SESSION_WEIGHT;
+
+    public static final String RENEW_SESSION_WEIGHT = &quot;zookeeper.connection_throttle_renew_session_weight&quot;;
+    private static final int DEFAULT_RENEW_SESSION_WEIGHT;
+
+    // for unit tests only
+    protected  static void setConnectionWeightEnabled(boolean enabled) {
+<span class="nc" id="L126">        connectionWeightEnabled = enabled;</span>
+<span class="nc" id="L127">        logWeighedThrottlingSetting();</span>
+<span class="nc" id="L128">    }</span>
+
+    private static void logWeighedThrottlingSetting() {
+<span class="nc bnc" id="L131" title="All 2 branches missed.">        if (connectionWeightEnabled) {</span>
+<span class="nc" id="L132">            LOG.info(&quot;Weighed connection throttling is enabled. &quot;</span>
+                    + &quot;But it will only be effective if connection throttling is enabled&quot;);
+<span class="nc" id="L134">            LOG.info(</span>
+                    &quot;The weights for different session types are: global {} renew {} local {}&quot;,
+<span class="nc" id="L136">                    DEFAULT_GLOBAL_SESSION_WEIGHT,</span>
+<span class="nc" id="L137">                    DEFAULT_RENEW_SESSION_WEIGHT,</span>
+<span class="nc" id="L138">                    DEFAULT_LOCAL_SESSION_WEIGHT</span>
+            );
+        } else {
+<span class="nc" id="L141">            LOG.info(&quot;Weighed connection throttling is disabled&quot;);</span>
+        }
+<span class="nc" id="L143">    }</span>
+
+    static {
+<span class="nc" id="L146">        int tokens = Integer.getInteger(CONNECTION_THROTTLE_TOKENS, 0);</span>
+<span class="nc" id="L147">        int fillCount = Integer.getInteger(CONNECTION_THROTTLE_FILL_COUNT, 1);</span>
+
+<span class="nc" id="L149">        connectionWeightEnabled = Boolean.getBoolean(WEIGHED_CONNECTION_THROTTLE);</span>
+
+        // if not specified, the weights for a global session, a local session, and a renew session
+        // are 3, 1, 2 respectively. The weight for a global session is 3 because in our connection benchmarking,
+        // the throughput of global sessions is about one third of that of local sessions. Renewing a session
+        // requires is more expensive than establishing a local session and cheaper than creating a global session so
+        // its default weight is set to 2.
+<span class="nc" id="L156">        int globalWeight = Integer.getInteger(GLOBAL_SESSION_WEIGHT, 3);</span>
+<span class="nc" id="L157">        int localWeight = Integer.getInteger(LOCAL_SESSION_WEIGHT, 1);</span>
+<span class="nc" id="L158">        int renewWeight = Integer.getInteger(RENEW_SESSION_WEIGHT, 2);</span>
+
+<span class="nc bnc" id="L160" title="All 2 branches missed.">        if (globalWeight &lt;= 0) {</span>
+<span class="nc" id="L161">            LOG.warn(&quot;Invalid global session weight {}. It should be larger than 0&quot;, globalWeight);</span>
+<span class="nc" id="L162">            DEFAULT_GLOBAL_SESSION_WEIGHT = 3;</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">        } else if (globalWeight &lt; localWeight) {</span>
+<span class="nc" id="L164">            LOG.warn(</span>
+                &quot;The global session weight {} is less than the local session weight {}. Use the local session weight.&quot;,
+<span class="nc" id="L166">                globalWeight,</span>
+<span class="nc" id="L167">                localWeight);</span>
+<span class="nc" id="L168">            DEFAULT_GLOBAL_SESSION_WEIGHT = localWeight;</span>
+        } else {
+<span class="nc" id="L170">            DEFAULT_GLOBAL_SESSION_WEIGHT = globalWeight;</span>
+        }
+
+<span class="nc bnc" id="L173" title="All 2 branches missed.">        if (localWeight &lt;= 0) {</span>
+<span class="nc" id="L174">            LOG.warn(&quot;Invalid local session weight {}. It should be larger than 0&quot;, localWeight);</span>
+<span class="nc" id="L175">            DEFAULT_LOCAL_SESSION_WEIGHT = 1;</span>
+        } else {
+<span class="nc" id="L177">            DEFAULT_LOCAL_SESSION_WEIGHT = localWeight;</span>
+        }
+
+<span class="nc bnc" id="L180" title="All 2 branches missed.">        if (renewWeight &lt;= 0) {</span>
+<span class="nc" id="L181">            LOG.warn(&quot;Invalid renew session weight {}. It should be larger than 0&quot;, renewWeight);</span>
+<span class="nc" id="L182">            DEFAULT_RENEW_SESSION_WEIGHT = 2;</span>
+<span class="nc bnc" id="L183" title="All 2 branches missed.">        } else if (renewWeight &lt; localWeight) {</span>
+<span class="nc" id="L184">            LOG.warn(</span>
+                &quot;The renew session weight {} is less than the local session weight {}. Use the local session weight.&quot;,
+<span class="nc" id="L186">                renewWeight,</span>
+<span class="nc" id="L187">                localWeight);</span>
+<span class="nc" id="L188">            DEFAULT_RENEW_SESSION_WEIGHT = localWeight;</span>
+        } else {
+<span class="nc" id="L190">            DEFAULT_RENEW_SESSION_WEIGHT = renewWeight;</span>
+        }
+
+        // This is based on the assumption that tokens set in config are for global sessions
+<span class="nc bnc" id="L194" title="All 2 branches missed.">        DEFAULT_CONNECTION_THROTTLE_TOKENS = connectionWeightEnabled</span>
+<span class="nc" id="L195">                ? DEFAULT_GLOBAL_SESSION_WEIGHT * tokens : tokens;</span>
+<span class="nc" id="L196">        DEFAULT_CONNECTION_THROTTLE_FILL_TIME = Integer.getInteger(CONNECTION_THROTTLE_FILL_TIME, 1);</span>
+<span class="nc bnc" id="L197" title="All 2 branches missed.">        DEFAULT_CONNECTION_THROTTLE_FILL_COUNT = connectionWeightEnabled</span>
+<span class="nc" id="L198">                ? DEFAULT_GLOBAL_SESSION_WEIGHT * fillCount : fillCount;</span>
+<span class="nc" id="L199">        DEFAULT_CONNECTION_THROTTLE_FREEZE_TIME = Integer.getInteger(CONNECTION_THROTTLE_FREEZE_TIME, -1);</span>
+<span class="nc" id="L200">        DEFAULT_CONNECTION_THROTTLE_DROP_INCREASE = getDoubleProp(CONNECTION_THROTTLE_DROP_INCREASE, 0.02);</span>
+<span class="nc" id="L201">        DEFAULT_CONNECTION_THROTTLE_DROP_DECREASE = getDoubleProp(CONNECTION_THROTTLE_DROP_DECREASE, 0.002);</span>
+<span class="nc" id="L202">        DEFAULT_CONNECTION_THROTTLE_DECREASE_RATIO = getDoubleProp(CONNECTION_THROTTLE_DECREASE_RATIO, 0);</span>
+
+<span class="nc" id="L204">        logWeighedThrottlingSetting();</span>
+<span class="nc" id="L205">    }</span>
+
+    /* Varation of Integer.getInteger for real number properties */
+    private static double getDoubleProp(String name, double def) {
+<span class="nc" id="L209">        String val = System.getProperty(name);</span>
+<span class="nc bnc" id="L210" title="All 2 branches missed.">        if (val != null) {</span>
+<span class="nc" id="L211">            return Double.parseDouble(val);</span>
+        } else {
+<span class="nc" id="L213">            return def;</span>
+        }
+    }
+
+<span class="nc" id="L217">    public BlueThrottle() {</span>
+        // Disable throttling by default (maxTokens = 0)
+<span class="nc" id="L219">        this.maxTokens = DEFAULT_CONNECTION_THROTTLE_TOKENS;</span>
+<span class="nc" id="L220">        this.fillTime = DEFAULT_CONNECTION_THROTTLE_FILL_TIME;</span>
+<span class="nc" id="L221">        this.fillCount = DEFAULT_CONNECTION_THROTTLE_FILL_COUNT;</span>
+<span class="nc" id="L222">        this.tokens = maxTokens;</span>
+<span class="nc" id="L223">        this.lastTime = Time.currentElapsedTime();</span>
+
+        // Disable BLUE throttling by default (freezeTime = -1)
+<span class="nc" id="L226">        this.freezeTime = DEFAULT_CONNECTION_THROTTLE_FREEZE_TIME;</span>
+<span class="nc" id="L227">        this.lastFreeze = Time.currentElapsedTime();</span>
+<span class="nc" id="L228">        this.dropIncrease = DEFAULT_CONNECTION_THROTTLE_DROP_INCREASE;</span>
+<span class="nc" id="L229">        this.dropDecrease = DEFAULT_CONNECTION_THROTTLE_DROP_DECREASE;</span>
+<span class="nc" id="L230">        this.decreasePoint = DEFAULT_CONNECTION_THROTTLE_DECREASE_RATIO;</span>
+<span class="nc" id="L231">        this.drop = 0;</span>
+
+<span class="nc" id="L233">        this.rng = new Random();</span>
+<span class="nc" id="L234">    }</span>
+
+    public synchronized void setMaxTokens(int max) {
+<span class="nc" id="L237">        int deficit = maxTokens - tokens;</span>
+<span class="nc" id="L238">        maxTokens = max;</span>
+<span class="nc" id="L239">        tokens = max - deficit;</span>
+<span class="nc" id="L240">    }</span>
+
+    public synchronized void setFillTime(int time) {
+<span class="nc" id="L243">        fillTime = time;</span>
+<span class="nc" id="L244">    }</span>
+
+    public synchronized void setFillCount(int count) {
+<span class="nc" id="L247">        fillCount = count;</span>
+<span class="nc" id="L248">    }</span>
+
+    public synchronized void setFreezeTime(int time) {
+<span class="nc" id="L251">        freezeTime = time;</span>
+<span class="nc" id="L252">    }</span>
+
+    public synchronized void setDropIncrease(double increase) {
+<span class="nc" id="L255">        dropIncrease = increase;</span>
+<span class="nc" id="L256">    }</span>
+
+    public synchronized void setDropDecrease(double decrease) {
+<span class="nc" id="L259">        dropDecrease = decrease;</span>
+<span class="nc" id="L260">    }</span>
+
+    public synchronized void setDecreasePoint(double ratio) {
+<span class="nc" id="L263">        decreasePoint = ratio;</span>
+<span class="nc" id="L264">    }</span>
+
+    public synchronized int getMaxTokens() {
+<span class="nc" id="L267">        return maxTokens;</span>
+    }
+
+    public synchronized int getFillTime() {
+<span class="nc" id="L271">        return fillTime;</span>
+    }
+
+    public synchronized int getFillCount() {
+<span class="nc" id="L275">        return fillCount;</span>
+    }
+
+    public synchronized int getFreezeTime() {
+<span class="nc" id="L279">        return freezeTime;</span>
+    }
+
+    public synchronized double getDropIncrease() {
+<span class="nc" id="L283">        return dropIncrease;</span>
+    }
+
+    public synchronized double getDropDecrease() {
+<span class="nc" id="L287">        return dropDecrease;</span>
+    }
+
+    public synchronized double getDecreasePoint() {
+<span class="nc" id="L291">        return decreasePoint;</span>
+    }
+
+    public synchronized double getDropChance() {
+<span class="nc" id="L295">        return drop;</span>
+    }
+
+    public synchronized int getDeficit() {
+<span class="nc" id="L299">        return maxTokens - tokens;</span>
+    }
+
+    public int getRequiredTokensForGlobal() {
+<span class="nc" id="L303">        return BlueThrottle.DEFAULT_GLOBAL_SESSION_WEIGHT;</span>
+    }
+
+    public int getRequiredTokensForLocal() {
+<span class="nc" id="L307">        return BlueThrottle.DEFAULT_LOCAL_SESSION_WEIGHT;</span>
+    }
+
+    public int getRequiredTokensForRenew() {
+<span class="nc" id="L311">        return BlueThrottle.DEFAULT_RENEW_SESSION_WEIGHT;</span>
+    }
+
+    public boolean isConnectionWeightEnabled() {
+<span class="nc" id="L315">        return BlueThrottle.connectionWeightEnabled;</span>
+    }
+
+    public synchronized boolean checkLimit(int need) {
+        // A maxTokens setting of zero disables throttling
+<span class="nc bnc" id="L320" title="All 2 branches missed.">        if (maxTokens == 0) {</span>
+<span class="nc" id="L321">            return true;</span>
+        }
+
+<span class="nc" id="L324">        long now = Time.currentElapsedTime();</span>
+<span class="nc" id="L325">        long diff = now - lastTime;</span>
+
+<span class="nc bnc" id="L327" title="All 2 branches missed.">        if (diff &gt; fillTime) {</span>
+<span class="nc" id="L328">            int refill = (int) (diff * fillCount / fillTime);</span>
+<span class="nc" id="L329">            tokens = Math.min(tokens + refill, maxTokens);</span>
+<span class="nc" id="L330">            lastTime = now;</span>
+        }
+
+        // A freeze time of -1 disables BLUE randomized throttling
+<span class="nc bnc" id="L334" title="All 2 branches missed.">        if (freezeTime != -1) {</span>
+<span class="nc bnc" id="L335" title="All 2 branches missed.">            if (!checkBlue(now)) {</span>
+<span class="nc" id="L336">                return false;</span>
+            }
+        }
+
+<span class="nc bnc" id="L340" title="All 2 branches missed.">        if (tokens &lt; need) {</span>
+<span class="nc" id="L341">            return false;</span>
+        }
+
+<span class="nc" id="L344">        tokens -= need;</span>
+<span class="nc" id="L345">        return true;</span>
+    }
+
+    public synchronized boolean checkBlue(long now) {
+<span class="nc" id="L349">        int length = maxTokens - tokens;</span>
+<span class="nc" id="L350">        int limit = maxTokens;</span>
+<span class="nc" id="L351">        long diff = now - lastFreeze;</span>
+<span class="nc" id="L352">        long threshold = Math.round(maxTokens * decreasePoint);</span>
+
+<span class="nc bnc" id="L354" title="All 2 branches missed.">        if (diff &gt; freezeTime) {</span>
+<span class="nc bnc" id="L355" title="All 4 branches missed.">            if ((length == limit) &amp;&amp; (drop &lt; 1)) {</span>
+<span class="nc" id="L356">                drop = Math.min(drop + dropIncrease, 1);</span>
+<span class="nc bnc" id="L357" title="All 4 branches missed.">            } else if ((length &lt;= threshold) &amp;&amp; (drop &gt; 0)) {</span>
+<span class="nc" id="L358">                drop = Math.max(drop - dropDecrease, 0);</span>
+            }
+<span class="nc" id="L360">            lastFreeze = now;</span>
+        }
+
+<span class="nc bnc" id="L363" title="All 2 branches missed.">        return !(rng.nextDouble() &lt; drop);</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

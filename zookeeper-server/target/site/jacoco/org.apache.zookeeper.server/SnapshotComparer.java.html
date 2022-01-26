@@ -1,0 +1,460 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SnapshotComparer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">SnapshotComparer.java</span></div><h1>SnapshotComparer.java</h1><pre class="source lang-java linenums">/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import java.io.File;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
+import java.util.zip.CheckedInputStream;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.jute.BinaryInputArchive;
+import org.apache.jute.InputArchive;
+import org.apache.zookeeper.server.persistence.FileSnap;
+import org.apache.zookeeper.server.persistence.SnapStream;
+import org.apache.zookeeper.util.ServiceUtils;
+
+/**
+ * SnapshotComparer is a tool that loads and compares two snapshots with configurable threshold and various filters, and outputs information about the delta.
+ * The delta includes specific znode paths added, updated, deleted comparing one snapshot to another.
+ * It's useful in use cases that involve snapshot analysis, such as offline data consistency checking, and data trending analysis (e.g. what's growing under which zNode path during when).
+ * Only outputs information about permanent nodes, ignoring both sessions and ephemeral nodes.
+ */
+public class SnapshotComparer {
+  private final Options options;
+  private static final String leftOption = &quot;left&quot;;
+  private static final String rightOption = &quot;right&quot;;
+  private static final String byteThresholdOption = &quot;bytes&quot;;
+  private static final String nodeThresholdOption = &quot;nodes&quot;;
+  private static final String debugOption = &quot;debug&quot;;
+  private static final String interactiveOption = &quot;interactive&quot;;
+
+  @SuppressWarnings(&quot;static&quot;)
+<span class="nc" id="L59">  private SnapshotComparer() {</span>
+<span class="nc" id="L60">    options = new Options();</span>
+<span class="nc" id="L61">    options.addOption(</span>
+<span class="nc" id="L62">        Option.builder(&quot;l&quot;)</span>
+<span class="nc" id="L63">            .hasArg()</span>
+<span class="nc" id="L64">            .required(true)</span>
+<span class="nc" id="L65">            .longOpt(leftOption)</span>
+<span class="nc" id="L66">            .desc(&quot;(Required) The left snapshot file.&quot;)</span>
+<span class="nc" id="L67">            .argName(&quot;LEFT&quot;)</span>
+<span class="nc" id="L68">            .type(File.class)</span>
+<span class="nc" id="L69">            .build());</span>
+<span class="nc" id="L70">    options.addOption(</span>
+<span class="nc" id="L71">        Option.builder(&quot;r&quot;)</span>
+<span class="nc" id="L72">            .hasArg()</span>
+<span class="nc" id="L73">            .required(true)</span>
+<span class="nc" id="L74">            .longOpt(rightOption)</span>
+<span class="nc" id="L75">            .desc(&quot;(Required) The right snapshot file.&quot;)</span>
+<span class="nc" id="L76">            .argName(&quot;RIGHT&quot;)</span>
+<span class="nc" id="L77">            .type(File.class)</span>
+<span class="nc" id="L78">            .build());</span>
+<span class="nc" id="L79">    options.addOption(</span>
+<span class="nc" id="L80">        Option.builder(&quot;b&quot;)</span>
+<span class="nc" id="L81">            .hasArg()</span>
+<span class="nc" id="L82">            .required(true)</span>
+<span class="nc" id="L83">            .longOpt(byteThresholdOption)</span>
+<span class="nc" id="L84">            .desc(&quot;(Required) The node data delta size threshold, in bytes, for printing the node.&quot;)</span>
+<span class="nc" id="L85">            .argName(&quot;BYTETHRESHOLD&quot;)</span>
+<span class="nc" id="L86">            .type(String.class)</span>
+<span class="nc" id="L87">            .build());</span>
+<span class="nc" id="L88">    options.addOption(</span>
+<span class="nc" id="L89">        Option.builder(&quot;n&quot;)</span>
+<span class="nc" id="L90">            .hasArg()</span>
+<span class="nc" id="L91">            .required(true)</span>
+<span class="nc" id="L92">            .longOpt(nodeThresholdOption)</span>
+<span class="nc" id="L93">            .desc(&quot;(Required) The descendant node delta size threshold, in nodes, for printing the node.&quot;)</span>
+<span class="nc" id="L94">            .argName(&quot;NODETHRESHOLD&quot;)</span>
+<span class="nc" id="L95">            .type(String.class)</span>
+<span class="nc" id="L96">            .build());</span>
+<span class="nc" id="L97">    options.addOption(&quot;d&quot;, debugOption, false, &quot;Use debug output.&quot;);</span>
+<span class="nc" id="L98">    options.addOption(&quot;i&quot;, interactiveOption, false, &quot;Enter interactive mode.&quot;);</span>
+<span class="nc" id="L99">  }</span>
+
+  private void usage() {
+<span class="nc" id="L102">    HelpFormatter help = new HelpFormatter();</span>
+
+<span class="nc" id="L104">    help.printHelp(</span>
+        120,
+<span class="nc" id="L106">        &quot;java -cp &lt;classPath&gt; &quot; + SnapshotComparer.class.getName(),</span>
+        &quot;&quot;,
+        options,
+        &quot;&quot;);
+<span class="nc" id="L110">  }</span>
+
+  public static void main(String[] args) throws Exception {
+<span class="nc" id="L113">    SnapshotComparer app = new SnapshotComparer();</span>
+<span class="nc" id="L114">    app.compareSnapshots(args);</span>
+<span class="nc" id="L115">  }</span>
+
+  private void compareSnapshots(String[] args) throws Exception {
+    CommandLine parsedOptions;
+    try {
+<span class="nc" id="L120">      parsedOptions = new DefaultParser().parse(options, args);</span>
+<span class="nc" id="L121">    } catch (ParseException e) {</span>
+<span class="nc" id="L122">      System.err.println(e.getMessage());</span>
+<span class="nc" id="L123">      usage();</span>
+<span class="nc" id="L124">      ServiceUtils.requestSystemExit(ExitCode.INVALID_INVOCATION.getValue());</span>
+<span class="nc" id="L125">      return;</span>
+<span class="nc" id="L126">    }</span>
+
+<span class="nc" id="L128">    File left = (File) parsedOptions.getParsedOptionValue(leftOption);</span>
+<span class="nc" id="L129">    File right = (File) parsedOptions.getParsedOptionValue(rightOption);</span>
+<span class="nc" id="L130">    int byteThreshold = Integer.parseInt((String) parsedOptions.getParsedOptionValue(byteThresholdOption));</span>
+<span class="nc" id="L131">    int nodeThreshold = Integer.parseInt((String) parsedOptions.getParsedOptionValue(nodeThresholdOption));</span>
+<span class="nc" id="L132">    boolean debug = parsedOptions.hasOption(debugOption);</span>
+<span class="nc" id="L133">    boolean interactive = parsedOptions.hasOption(interactiveOption);</span>
+<span class="nc" id="L134">    System.out.println(&quot;Successfully parsed options!&quot;);</span>
+<span class="nc" id="L135">    TreeInfo leftTree = new TreeInfo(left);</span>
+<span class="nc" id="L136">    TreeInfo rightTree = new TreeInfo(right);</span>
+
+<span class="nc" id="L138">    System.out.println(leftTree.toString());</span>
+<span class="nc" id="L139">    System.out.println(rightTree.toString());</span>
+
+<span class="nc" id="L141">    compareTrees(leftTree, rightTree, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L142">  }</span>
+
+  private static class TreeInfo {
+    public static class TreeNode {
+      final String label;
+      final long size;
+      final List&lt;TreeNode&gt; children;
+      long descendantSize;
+      long descendantCount;
+
+<span class="nc" id="L152">      public static class AlphabeticComparator implements Comparator&lt;TreeNode&gt;, Serializable {</span>
+        private static final long serialVersionUID = 2601197766392565593L;
+
+        public int compare(TreeNode left, TreeNode right) {
+<span class="nc bnc" id="L156" title="All 2 branches missed.">          if (left == right) {</span>
+<span class="nc" id="L157">            return 0;</span>
+          }
+<span class="nc bnc" id="L159" title="All 2 branches missed.">          if (left == null) {</span>
+<span class="nc" id="L160">            return -1;</span>
+          }
+<span class="nc bnc" id="L162" title="All 2 branches missed.">          if (right == null) {</span>
+<span class="nc" id="L163">            return 1;</span>
+          }
+<span class="nc" id="L165">          return left.label.compareTo(right.label);</span>
+        }
+      }
+
+<span class="nc" id="L169">      public TreeNode(String label, long size) {</span>
+<span class="nc" id="L170">        this.label = label;</span>
+<span class="nc" id="L171">        this.size = size;</span>
+<span class="nc" id="L172">        this.children = new ArrayList&lt;TreeNode&gt;();</span>
+<span class="nc" id="L173">      }</span>
+
+      void populateChildren(String path, DataTree dataTree, TreeInfo treeInfo) throws Exception {
+<span class="nc" id="L176">        populateChildren(path, dataTree, treeInfo, 1);</span>
+<span class="nc" id="L177">      }</span>
+
+      void populateChildren(String path, DataTree dataTree, TreeInfo treeInfo, int currentDepth) throws Exception {
+<span class="nc" id="L180">        List&lt;String&gt; childLabels = null;</span>
+<span class="nc" id="L181">        childLabels = dataTree.getChildren(path, null, null);</span>
+
+<span class="nc bnc" id="L183" title="All 4 branches missed.">        if (childLabels != null &amp;&amp; !childLabels.isEmpty()) {</span>
+<span class="nc bnc" id="L184" title="All 2 branches missed.">          for (String childName : childLabels){</span>
+<span class="nc" id="L185">            String childPath = path + &quot;/&quot; + childName;</span>
+<span class="nc" id="L186">            DataNode childNode = dataTree.getNode(childPath);</span>
+            long size;
+<span class="nc" id="L188">            synchronized (childNode) {</span>
+<span class="nc bnc" id="L189" title="All 2 branches missed.">              size = childNode.data == null ? 0 : childNode.data.length;</span>
+<span class="nc" id="L190">            }</span>
+<span class="nc" id="L191">            TreeNode childTreeNode = new TreeNode(childPath, size);</span>
+<span class="nc" id="L192">            childTreeNode.populateChildren(childPath, dataTree, treeInfo, currentDepth + 1);</span>
+<span class="nc" id="L193">            children.add(childTreeNode);</span>
+<span class="nc" id="L194">          }</span>
+        }
+<span class="nc" id="L196">        descendantSize = 0;</span>
+<span class="nc" id="L197">        descendantCount = 0;</span>
+<span class="nc bnc" id="L198" title="All 2 branches missed.">        for (TreeNode child : children) {</span>
+<span class="nc" id="L199">          descendantSize += child.descendantSize;</span>
+<span class="nc" id="L200">          descendantCount += child.descendantCount;</span>
+<span class="nc" id="L201">        }</span>
+<span class="nc" id="L202">        descendantSize += this.size;</span>
+<span class="nc" id="L203">        descendantCount += this.children.size();</span>
+
+<span class="nc" id="L205">        treeInfo.registerNode(this, currentDepth);</span>
+<span class="nc" id="L206">      }</span>
+    }
+
+    final TreeNode root;
+    long count;
+<span class="nc" id="L211">    List&lt;ArrayList&lt;TreeNode&gt;&gt; nodesAtDepths = new ArrayList&lt;ArrayList&lt;TreeNode&gt;&gt;();</span>
+<span class="nc" id="L212">    Map&lt;String, TreeNode&gt; nodesByName = new HashMap&lt;String, TreeNode&gt;();</span>
+
+<span class="nc" id="L214">    TreeInfo(File snapshot) throws Exception {</span>
+<span class="nc" id="L215">      DataTree dataTree = getSnapshot(snapshot);</span>
+
+<span class="nc" id="L217">      count = 0;</span>
+<span class="nc" id="L218">      long beginning = System.nanoTime();</span>
+<span class="nc" id="L219">      DataNode root = dataTree.getNode(&quot;&quot;);</span>
+<span class="nc bnc" id="L220" title="All 2 branches missed.">      long size = root.data == null ? 0 : root.data.length;</span>
+<span class="nc" id="L221">      this.root = new TreeNode(&quot;&quot;, size);</span>
+      // Construct TreeInfo tree from DataTree
+<span class="nc" id="L223">      this.root.populateChildren(&quot;&quot;, dataTree, this);</span>
+<span class="nc" id="L224">      long end = System.nanoTime();</span>
+
+<span class="nc" id="L226">      System.out.println(String.format(&quot;Processed data tree in %f seconds&quot;,</span>
+<span class="nc" id="L227">          ((((double) end - beginning) / 1000000)) / 1000));</span>
+<span class="nc" id="L228">    }</span>
+
+    void registerNode(TreeNode node, int depth) {
+<span class="nc bnc" id="L231" title="All 2 branches missed.">      while (depth &gt; nodesAtDepths.size()) {</span>
+<span class="nc" id="L232">        nodesAtDepths.add(new ArrayList&lt;TreeNode&gt;());</span>
+      }
+<span class="nc" id="L234">      nodesAtDepths.get(depth - 1).add(node);</span>
+<span class="nc" id="L235">      nodesByName.put(node.label, node);</span>
+
+<span class="nc" id="L237">      this.count++;</span>
+<span class="nc" id="L238">    }</span>
+
+    public String toString() {
+<span class="nc" id="L241">      StringBuilder builder = new StringBuilder();</span>
+<span class="nc" id="L242">      builder.append(String.format(&quot;Node count: %d%n&quot;, count));</span>
+<span class="nc" id="L243">      builder.append(String.format(&quot;Total size: %d%n&quot;, root.descendantSize));</span>
+<span class="nc" id="L244">      builder.append(String.format(&quot;Max depth: %d%n&quot;, nodesAtDepths.size()));</span>
+<span class="nc bnc" id="L245" title="All 2 branches missed.">      for (int i = 0; i &lt; nodesAtDepths.size(); i++) {</span>
+<span class="nc" id="L246">        builder.append(String.format(&quot;Count of nodes at depth %d: %d%n&quot;, i, nodesAtDepths.get(i).size()));</span>
+      }
+<span class="nc" id="L248">      return builder.toString();</span>
+    }
+
+    public static Comparator&lt;TreeNode&gt; MakeAlphabeticComparator() {
+<span class="nc" id="L252">      return new TreeNode.AlphabeticComparator();</span>
+    }
+  }
+
+  /**
+   * Parse a Zookeeper snapshot file to DataTree
+   * @param file the snapshot file
+   * @throws Exception
+   */
+  private static DataTree getSnapshot(File file) throws Exception {
+<span class="nc" id="L262">    FileSnap fileSnap = new FileSnap(null);</span>
+<span class="nc" id="L263">    DataTree dataTree = new DataTree();</span>
+<span class="nc" id="L264">    Map&lt;Long, Integer&gt; sessions = new HashMap&lt;Long, Integer&gt;();</span>
+<span class="nc" id="L265">    CheckedInputStream snapIS = SnapStream.getInputStream(file);</span>
+
+<span class="nc" id="L267">    long beginning = System.nanoTime();</span>
+<span class="nc" id="L268">    InputArchive ia = BinaryInputArchive.getArchive(snapIS);</span>
+<span class="nc" id="L269">    fileSnap.deserialize(dataTree, sessions, ia);</span>
+<span class="nc" id="L270">    long end = System.nanoTime();</span>
+<span class="nc" id="L271">    System.out.println(String.format(&quot;Deserialized snapshot in %s in %f seconds&quot;, file.getName(),</span>
+<span class="nc" id="L272">        (((double) (end - beginning) / 1000000)) / 1000));</span>
+<span class="nc" id="L273">    return dataTree;</span>
+  }
+
+  private static void printThresholdInfo(int byteThreshold, int nodeThreshold) {
+<span class="nc" id="L277">    System.out.println(String.format(&quot;Printing analysis for nodes difference larger than %d bytes or node count difference larger than %d.&quot;, byteThreshold, nodeThreshold));</span>
+<span class="nc" id="L278">  }</span>
+
+  private static void compareTrees(TreeInfo left, TreeInfo right, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc" id="L281">    int maxDepth = Math.max(left.nodesAtDepths.size(), right.nodesAtDepths.size());</span>
+
+<span class="nc bnc" id="L283" title="All 2 branches missed.">    if (!interactive) {</span>
+<span class="nc" id="L284">      printThresholdInfo(byteThreshold, nodeThreshold);</span>
+<span class="nc bnc" id="L285" title="All 2 branches missed.">      for (int i = 0; i &lt; maxDepth; i++) {</span>
+<span class="nc" id="L286">        System.out.println(String.format(&quot;Analysis for depth %d&quot;, i));</span>
+<span class="nc" id="L287">        compareLine(left, right, i, byteThreshold, nodeThreshold, debug, interactive);</span>
+      }
+    } else {
+      // interactive mode
+<span class="nc" id="L291">      Scanner scanner = new Scanner(System.in);</span>
+<span class="nc" id="L292">      int currentDepth = 0;</span>
+<span class="nc bnc" id="L293" title="All 2 branches missed.">      while (currentDepth &lt; maxDepth) {</span>
+<span class="nc" id="L294">        System.out.println(String.format(&quot;Current depth is %d&quot;, currentDepth));</span>
+<span class="nc" id="L295">        System.out.println(&quot;- Press enter to move to print current depth layer;\n- Type a number to jump to and print all nodes at a given depth;\n- Enter an ABSOLUTE path to print the immediate subtree of a node. Path must start with '/'.&quot;);</span>
+<span class="nc" id="L296">        String input = scanner.nextLine();</span>
+<span class="nc" id="L297">        printThresholdInfo(byteThreshold, nodeThreshold);</span>
+<span class="nc bnc" id="L298" title="All 2 branches missed.">        if (input.isEmpty()) {</span>
+          // input is Enter
+<span class="nc" id="L300">          System.out.println(String.format(&quot;Analysis for depth %d&quot;, currentDepth));</span>
+<span class="nc" id="L301">          compareLine(left, right, currentDepth, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L302">          currentDepth++;</span>
+        } else {
+          // input is a path
+<span class="nc bnc" id="L305" title="All 2 branches missed.">          if (input.startsWith(&quot;/&quot;)){</span>
+<span class="nc" id="L306">            System.out.println(String.format(&quot;Analysis for node %s&quot;, input));</span>
+<span class="nc" id="L307">            compareSubtree(left, right, input, byteThreshold, nodeThreshold, debug, interactive);</span>
+          } else {
+            // input is a number
+            try {
+<span class="nc" id="L311">              int depth = Integer.parseInt(input);</span>
+<span class="nc bnc" id="L312" title="All 4 branches missed.">              if (depth &lt; 0 || depth &gt;= maxDepth) {</span>
+<span class="nc" id="L313">                System.out.println(String.format(&quot;Depth must be in range [%d, %d]&quot;, 0, maxDepth - 1));</span>
+<span class="nc" id="L314">                continue;</span>
+              }
+<span class="nc" id="L316">              currentDepth = depth;</span>
+<span class="nc" id="L317">              System.out.println(String.format(&quot;Analysis for depth %d&quot;, currentDepth));</span>
+<span class="nc" id="L318">              compareLine(left, right, currentDepth, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L319">            } catch (NumberFormatException ex) {</span>
+              // input is invalid
+<span class="nc" id="L321">              System.out.println(String.format(&quot;Input %s is not valid. Depth must be in range [%d, %d]. Path must be an absolute path which starts with '/'.&quot;, input, 0, maxDepth - 1));</span>
+<span class="nc" id="L322">            }</span>
+          }
+        }
+<span class="nc" id="L325">        System.out.println(&quot;&quot;);</span>
+<span class="nc" id="L326">      }</span>
+    }
+<span class="nc" id="L328">    System.out.println(&quot;All layers compared.&quot;);</span>
+<span class="nc" id="L329">  }</span>
+
+  private static void compareSubtree(TreeInfo left, TreeInfo right, String path, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc" id="L332">    TreeInfo.TreeNode leftRoot = left.nodesByName.get(path);</span>
+<span class="nc" id="L333">    TreeInfo.TreeNode rightRoot = right.nodesByName.get(path);</span>
+
+<span class="nc bnc" id="L335" title="All 2 branches missed.">    List&lt;TreeInfo.TreeNode&gt; leftList = leftRoot == null ? new ArrayList&lt;TreeInfo.TreeNode&gt;() : leftRoot.children;</span>
+<span class="nc bnc" id="L336" title="All 2 branches missed.">    List&lt;TreeInfo.TreeNode&gt; rightList = rightRoot == null ? new ArrayList&lt;TreeInfo.TreeNode&gt;() : rightRoot.children;</span>
+
+<span class="nc bnc" id="L338" title="All 4 branches missed.">    if (leftRoot == null &amp;&amp; rightRoot == null) {</span>
+<span class="nc" id="L339">      System.out.println(String.format(&quot;Path %s is neither found in left tree nor right tree.&quot;, path));</span>
+    } else {
+<span class="nc" id="L341">      compareNodes(leftList, rightList, byteThreshold, nodeThreshold, debug, interactive);</span>
+    }
+<span class="nc" id="L343">  }</span>
+
+  /**
+   * Compare left tree and right tree at the same depth.
+   * @param left the left data tree
+   * @param right the right data tree
+   * @param depth the depth of the data tree to be compared at
+   * @param byteThreshold the node data delta size threshold, in bytes, for printing the node
+   * @param nodeThreshold the descendant node delta size threshold, in nodes, for printing the node
+   * @param debug If true, print more detailed debug information
+   * @param interactive If true, enter interactive mode
+   */
+  private static void compareLine(TreeInfo left, TreeInfo right, int depth, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc bnc" id="L356" title="All 2 branches missed.">    List&lt;TreeInfo.TreeNode&gt; leftList = depth &gt;= left.nodesAtDepths.size() ? new ArrayList&lt;&gt;() : left.nodesAtDepths.get(depth);</span>
+<span class="nc bnc" id="L357" title="All 2 branches missed.">    List&lt;TreeInfo.TreeNode&gt; rightList = depth &gt;= right.nodesAtDepths.size() ? new ArrayList&lt;&gt;() : right.nodesAtDepths.get(depth);</span>
+
+<span class="nc" id="L359">    compareNodes(leftList, rightList, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L360">  }</span>
+
+  private static void compareNodes(List&lt;TreeInfo.TreeNode&gt; leftList, List&lt;TreeInfo.TreeNode&gt; rightList, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc" id="L363">    Comparator&lt;TreeInfo.TreeNode&gt; alphabeticComparator = TreeInfo.MakeAlphabeticComparator();</span>
+<span class="nc" id="L364">    Collections.sort(leftList, alphabeticComparator);</span>
+<span class="nc" id="L365">    Collections.sort(rightList, alphabeticComparator);</span>
+
+<span class="nc" id="L367">    int leftIndex = 0;</span>
+<span class="nc" id="L368">    int rightIndex = 0;</span>
+
+<span class="nc bnc" id="L370" title="All 2 branches missed.">    boolean leftRemaining = leftList.size() &gt; leftIndex;</span>
+<span class="nc bnc" id="L371" title="All 2 branches missed.">    boolean rightRemaining = rightList.size() &gt; rightIndex;</span>
+<span class="nc bnc" id="L372" title="All 4 branches missed.">    while (leftRemaining || rightRemaining) {</span>
+<span class="nc" id="L373">      TreeInfo.TreeNode leftNode = null;</span>
+<span class="nc bnc" id="L374" title="All 2 branches missed.">      if (leftRemaining) {</span>
+<span class="nc" id="L375">        leftNode = leftList.get(leftIndex);</span>
+      }
+
+<span class="nc" id="L378">      TreeInfo.TreeNode rightNode = null;</span>
+<span class="nc bnc" id="L379" title="All 2 branches missed.">      if (rightRemaining) {</span>
+<span class="nc" id="L380">        rightNode = rightList.get(rightIndex);</span>
+      }
+
+<span class="nc bnc" id="L383" title="All 4 branches missed.">      if (leftNode != null &amp;&amp; rightNode != null) {</span>
+<span class="nc bnc" id="L384" title="All 2 branches missed.">        if (debug) {</span>
+<span class="nc" id="L385">          System.out.println(String.format(&quot;Comparing %s to %s&quot;, leftNode.label, rightNode.label));</span>
+        }
+<span class="nc" id="L387">        int result = leftNode.label.compareTo(rightNode.label);</span>
+<span class="nc bnc" id="L388" title="All 2 branches missed.">        if (result &lt; 0) {</span>
+<span class="nc bnc" id="L389" title="All 2 branches missed.">          if (debug) {</span>
+<span class="nc" id="L390">            System.out.println(&quot;left is less&quot;);</span>
+          }
+<span class="nc" id="L392">          printLeftOnly(leftNode, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L393">          leftIndex++;</span>
+<span class="nc bnc" id="L394" title="All 2 branches missed.">        } else if (result &gt; 0) {</span>
+<span class="nc bnc" id="L395" title="All 2 branches missed.">          if (debug) {</span>
+<span class="nc" id="L396">            System.out.println(&quot;right is less&quot;);</span>
+          }
+<span class="nc" id="L398">          printRightOnly(rightNode, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L399">          rightIndex++;</span>
+        } else {
+<span class="nc bnc" id="L401" title="All 2 branches missed.">          if (debug) {</span>
+<span class="nc" id="L402">            System.out.println(&quot;same&quot;);</span>
+          }
+<span class="nc" id="L404">          printBoth(leftNode, rightNode, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L405">          leftIndex++;</span>
+<span class="nc" id="L406">          rightIndex++;</span>
+        }
+<span class="nc bnc" id="L408" title="All 2 branches missed.">      } else if (leftNode != null) {</span>
+<span class="nc" id="L409">        printLeftOnly(leftNode, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L410">        leftIndex++;</span>
+      } else {
+<span class="nc" id="L412">        printRightOnly(rightNode, byteThreshold, nodeThreshold, debug, interactive);</span>
+<span class="nc" id="L413">        rightIndex++;</span>
+      }
+
+<span class="nc bnc" id="L416" title="All 2 branches missed.">      leftRemaining = leftList.size() &gt; leftIndex;</span>
+<span class="nc bnc" id="L417" title="All 2 branches missed.">      rightRemaining = rightList.size() &gt; rightIndex;</span>
+<span class="nc" id="L418">    }</span>
+<span class="nc" id="L419">  }</span>
+
+  static void printLeftOnly(TreeInfo.TreeNode node, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc bnc" id="L422" title="All 4 branches missed.">    if (node.descendantSize &gt; byteThreshold || node.descendantCount &gt; nodeThreshold) {</span>
+<span class="nc" id="L423">      StringBuilder builder = new StringBuilder();</span>
+<span class="nc" id="L424">      builder.append(String.format(&quot;Node %s found only in left tree. &quot;, node.label));</span>
+<span class="nc" id="L425">      printNode(node, builder);</span>
+<span class="nc" id="L426">      System.out.println(builder.toString());</span>
+<span class="nc bnc" id="L427" title="All 4 branches missed.">    } else if (debug || interactive) {</span>
+<span class="nc" id="L428">      System.out.println(String.format(&quot;Filtered left node %s of size %d&quot;, node.label, node.descendantSize));</span>
+    }
+<span class="nc" id="L430">  }</span>
+
+  static void printRightOnly(TreeInfo.TreeNode node, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc bnc" id="L433" title="All 4 branches missed.">    if (node.descendantSize &gt; byteThreshold || node.descendantCount &gt; nodeThreshold) {</span>
+<span class="nc" id="L434">      StringBuilder builder = new StringBuilder();</span>
+<span class="nc" id="L435">      builder.append(String.format(&quot;Node %s found only in right tree. &quot;, node.label));</span>
+<span class="nc" id="L436">      printNode(node, builder);</span>
+<span class="nc" id="L437">      System.out.println(builder.toString());</span>
+<span class="nc bnc" id="L438" title="All 4 branches missed.">    } else if (debug || interactive) {</span>
+<span class="nc" id="L439">      System.out.println(String.format(&quot;Filtered right node %s of size %d&quot;, node.label, node.descendantSize));</span>
+    }
+<span class="nc" id="L441">  }</span>
+
+  static void printBoth(TreeInfo.TreeNode leftNode, TreeInfo.TreeNode rightNode, int byteThreshold, int nodeThreshold, boolean debug, boolean interactive) {
+<span class="nc bnc" id="L444" title="All 2 branches missed.">    if (Math.abs(rightNode.descendantSize - leftNode.descendantSize) &gt; byteThreshold</span>
+<span class="nc bnc" id="L445" title="All 2 branches missed.">        || Math.abs(rightNode.descendantCount - leftNode.descendantCount) &gt; nodeThreshold) {</span>
+<span class="nc" id="L446">      System.out.println(String.format(</span>
+          &quot;Node %s found in both trees. Delta: %d bytes, %d descendants&quot;,
+          leftNode.label,
+<span class="nc" id="L449">          rightNode.descendantSize - leftNode.descendantSize,</span>
+<span class="nc" id="L450">          rightNode.descendantCount - leftNode.descendantCount));</span>
+<span class="nc bnc" id="L451" title="All 4 branches missed.">    } else if (debug || interactive) {</span>
+<span class="nc" id="L452">      System.out.println(String.format(&quot;Filtered node %s of left size %d, right size %d&quot;, leftNode.label, leftNode.descendantSize, rightNode.descendantSize));</span>
+    }
+<span class="nc" id="L454">  }</span>
+
+  static void printNode(TreeInfo.TreeNode node, StringBuilder builder) {
+<span class="nc" id="L457">    builder.append(String.format(&quot;Descendant size: %d. Descendant count: %d&quot;, node.descendantSize, node.descendantCount));</span>
+<span class="nc" id="L458">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

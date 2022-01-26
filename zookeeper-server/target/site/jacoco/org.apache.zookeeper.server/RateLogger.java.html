@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RateLogger.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">RateLogger.java</span></div><h1>RateLogger.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import org.apache.zookeeper.common.Time;
+import org.slf4j.Logger;
+
+/**
+ * This logs the message once in the beginning and once every LOG_INTERVAL.
+ */
+public class RateLogger {
+
+    private final long LOG_INTERVAL; // Duration is in ms
+
+    public RateLogger(Logger log) {
+<span class="fc" id="L32">        this(log, 100);</span>
+<span class="fc" id="L33">    }</span>
+
+<span class="fc" id="L35">    public RateLogger(Logger log, long interval) {</span>
+<span class="fc" id="L36">        LOG = log;</span>
+<span class="fc" id="L37">        LOG_INTERVAL = interval;</span>
+<span class="fc" id="L38">    }</span>
+
+    private final Logger LOG;
+<span class="fc" id="L41">    private String msg = null;</span>
+    private long timestamp;
+<span class="fc" id="L43">    private int count = 0;</span>
+<span class="fc" id="L44">    private String value = null;</span>
+
+    public void flush() {
+<span class="nc bnc" id="L47" title="All 4 branches missed.">        if (msg != null &amp;&amp; count &gt; 0) {</span>
+<span class="nc" id="L48">            String log = &quot;&quot;;</span>
+<span class="nc bnc" id="L49" title="All 2 branches missed.">            if (count &gt; 1) {</span>
+<span class="nc" id="L50">                log = &quot;[&quot; + count + &quot; times] &quot;;</span>
+            }
+<span class="nc" id="L52">            log += &quot;Message: &quot; + msg;</span>
+<span class="nc bnc" id="L53" title="All 2 branches missed.">            if (value != null) {</span>
+<span class="nc" id="L54">                log += &quot; Last value:&quot; + value;</span>
+            }
+<span class="nc" id="L56">            LOG.warn(log);</span>
+        }
+<span class="nc" id="L58">        msg = null;</span>
+<span class="nc" id="L59">        value = null;</span>
+<span class="nc" id="L60">        count = 0;</span>
+<span class="nc" id="L61">    }</span>
+
+    public void rateLimitLog(String newMsg) {
+<span class="nc" id="L64">        rateLimitLog(newMsg, null);</span>
+<span class="nc" id="L65">    }</span>
+
+    /**
+     * In addition to the message, it also takes a value.
+     */
+    public void rateLimitLog(String newMsg, String value) {
+<span class="nc" id="L71">        long now = Time.currentElapsedTime();</span>
+<span class="nc bnc" id="L72" title="All 2 branches missed.">        if (newMsg.equals(msg)) {</span>
+<span class="nc" id="L73">            ++count;</span>
+<span class="nc" id="L74">            this.value = value;</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">            if (now - timestamp &gt;= LOG_INTERVAL) {</span>
+<span class="nc" id="L76">                flush();</span>
+<span class="nc" id="L77">                msg = newMsg;</span>
+<span class="nc" id="L78">                timestamp = now;</span>
+<span class="nc" id="L79">                this.value = value;</span>
+            }
+        } else {
+<span class="nc" id="L82">            flush();</span>
+<span class="nc" id="L83">            msg = newMsg;</span>
+<span class="nc" id="L84">            this.value = value;</span>
+<span class="nc" id="L85">            timestamp = now;</span>
+<span class="nc" id="L86">            LOG.warn(&quot;Message:{} Value:{}&quot;, msg, value);</span>
+        }
+<span class="nc" id="L88">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>
