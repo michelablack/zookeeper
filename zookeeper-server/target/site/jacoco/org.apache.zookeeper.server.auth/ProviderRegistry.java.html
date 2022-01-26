@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ProviderRegistry.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.auth</a> &gt; <span class="el_source">ProviderRegistry.java</span></div><h1>ProviderRegistry.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.auth;
+
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
+import org.apache.zookeeper.server.ZooKeeperServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+<span class="nc" id="L28">public class ProviderRegistry {</span>
+
+<span class="nc" id="L30">    private static final Logger LOG = LoggerFactory.getLogger(ProviderRegistry.class);</span>
+
+    public static final String AUTHPROVIDER_PROPERTY_PREFIX = &quot;zookeeper.authProvider.&quot;;
+
+<span class="nc" id="L34">    private static boolean initialized = false;</span>
+<span class="nc" id="L35">    private static final Map&lt;String, AuthenticationProvider&gt; authenticationProviders = new HashMap&lt;&gt;();</span>
+
+    //VisibleForTesting
+    public static void reset() {
+<span class="nc" id="L39">        synchronized (ProviderRegistry.class) {</span>
+<span class="nc" id="L40">            initialized = false;</span>
+<span class="nc" id="L41">            authenticationProviders.clear();</span>
+<span class="nc" id="L42">        }</span>
+<span class="nc" id="L43">    }</span>
+
+    public static void initialize() {
+<span class="nc" id="L46">        synchronized (ProviderRegistry.class) {</span>
+<span class="nc" id="L47">            IPAuthenticationProvider ipp = new IPAuthenticationProvider();</span>
+<span class="nc" id="L48">            authenticationProviders.put(ipp.getScheme(), ipp);</span>
+
+<span class="nc bnc" id="L50" title="All 2 branches missed.">            if (DigestAuthenticationProvider.isEnabled()) {</span>
+<span class="nc" id="L51">                DigestAuthenticationProvider digp = new DigestAuthenticationProvider();</span>
+<span class="nc" id="L52">                authenticationProviders.put(digp.getScheme(), digp);</span>
+            }
+
+<span class="nc" id="L55">            Enumeration&lt;Object&gt; en = System.getProperties().keys();</span>
+<span class="nc bnc" id="L56" title="All 2 branches missed.">            while (en.hasMoreElements()) {</span>
+<span class="nc" id="L57">                String k = (String) en.nextElement();</span>
+<span class="nc bnc" id="L58" title="All 2 branches missed.">                if (k.startsWith(AUTHPROVIDER_PROPERTY_PREFIX)) {</span>
+<span class="nc" id="L59">                    String className = System.getProperty(k);</span>
+                    try {
+<span class="nc" id="L61">                        Class&lt;?&gt; c = ZooKeeperServer.class.getClassLoader().loadClass(className);</span>
+<span class="nc" id="L62">                        AuthenticationProvider ap = (AuthenticationProvider) c.getDeclaredConstructor().newInstance();</span>
+<span class="nc" id="L63">                        authenticationProviders.put(ap.getScheme(), ap);</span>
+<span class="nc" id="L64">                    } catch (Exception e) {</span>
+<span class="nc" id="L65">                        LOG.warn(&quot;Problems loading {}&quot;, className, e);</span>
+<span class="nc" id="L66">                    }</span>
+                }
+<span class="nc" id="L68">            }</span>
+<span class="nc" id="L69">            initialized = true;</span>
+<span class="nc" id="L70">        }</span>
+<span class="nc" id="L71">    }</span>
+
+    public static ServerAuthenticationProvider getServerProvider(String scheme) {
+<span class="nc" id="L74">        return WrappedAuthenticationProvider.wrap(getProvider(scheme));</span>
+    }
+
+    public static AuthenticationProvider getProvider(String scheme) {
+<span class="nc bnc" id="L78" title="All 2 branches missed.">        if (!initialized) {</span>
+<span class="nc" id="L79">            initialize();</span>
+        }
+<span class="nc" id="L81">        return authenticationProviders.get(scheme);</span>
+    }
+
+    public static void removeProvider(String scheme) {
+<span class="nc" id="L85">        authenticationProviders.remove(scheme);</span>
+<span class="nc" id="L86">    }</span>
+
+    public static String listProviders() {
+<span class="nc" id="L89">        StringBuilder sb = new StringBuilder();</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">        for (String s : authenticationProviders.keySet()) {</span>
+<span class="nc" id="L91">            sb.append(s).append(&quot; &quot;);</span>
+<span class="nc" id="L92">        }</span>
+<span class="nc" id="L93">        return sb.toString();</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

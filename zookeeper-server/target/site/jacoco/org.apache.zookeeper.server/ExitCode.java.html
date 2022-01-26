@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ExitCode.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">ExitCode.java</span></div><h1>ExitCode.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+/**
+ * Exit code used to exit server
+ */
+<span class="nc" id="L24">public enum ExitCode {</span>
+
+    /** Execution finished normally */
+<span class="nc" id="L27">    EXECUTION_FINISHED(0),</span>
+
+    /** Unexpected errors like IO Exceptions */
+<span class="nc" id="L30">    UNEXPECTED_ERROR(1),</span>
+
+    /** Invalid arguments during invocations */
+<span class="nc" id="L33">    INVALID_INVOCATION(2),</span>
+
+    /** Cannot access datadir when trying to replicate server */
+<span class="nc" id="L36">    UNABLE_TO_ACCESS_DATADIR(3),</span>
+
+    /** Unable to start admin server at ZooKeeper startup */
+<span class="nc" id="L39">    ERROR_STARTING_ADMIN_SERVER(4),</span>
+
+    /** Severe error during snapshot IO */
+<span class="nc" id="L42">    TXNLOG_ERROR_TAKING_SNAPSHOT(10),</span>
+
+    /** zxid from COMMIT does not match the one from pendingTxns queue */
+<span class="nc" id="L45">    UNMATCHED_TXN_COMMIT(12),</span>
+
+    /** Unexpected packet from leader, or unable to truncate log on Leader.TRUNC */
+<span class="nc" id="L48">    QUORUM_PACKET_ERROR(13),</span>
+
+    /** Unable to bind to the quorum (election) port after multiple retry */
+<span class="nc" id="L51">    UNABLE_TO_BIND_QUORUM_PORT(14);</span>
+
+    private final int value;
+
+<span class="nc" id="L55">    ExitCode(final int newValue) {</span>
+<span class="nc" id="L56">        value = newValue;</span>
+<span class="nc" id="L57">    }</span>
+
+    public int getValue() {
+<span class="nc" id="L60">        return value;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

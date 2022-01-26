@@ -1,0 +1,646 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>CommitProcessor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum</a> &gt; <span class="el_source">CommitProcessor.java</span></div><h1>CommitProcessor.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.zookeeper.ZooDefs.OpCode;
+import org.apache.zookeeper.common.Time;
+import org.apache.zookeeper.server.ExitCode;
+import org.apache.zookeeper.server.Request;
+import org.apache.zookeeper.server.RequestProcessor;
+import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.WorkerService;
+import org.apache.zookeeper.server.ZooKeeperCriticalThread;
+import org.apache.zookeeper.server.ZooKeeperServerListener;
+import org.apache.zookeeper.util.ServiceUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This RequestProcessor matches the incoming committed requests with the
+ * locally submitted requests. The trick is that locally submitted requests that
+ * change the state of the system will come back as incoming committed requests,
+ * so we need to match them up. Instead of just waiting for the committed requests,
+ * we process the uncommitted requests that belong to other sessions.
+ *
+ * The CommitProcessor is multi-threaded. Communication between threads is
+ * handled via queues, atomics, and wait/notifyAll synchronized on the
+ * processor. The CommitProcessor acts as a gateway for allowing requests to
+ * continue with the remainder of the processing pipeline. It will allow many
+ * read requests but only a single write request to be in flight simultaneously,
+ * thus ensuring that write requests are processed in transaction id order.
+ *
+ *   - 1   commit processor main thread, which watches the request queues and
+ *         assigns requests to worker threads based on their sessionId so that
+ *         read and write requests for a particular session are always assigned
+ *         to the same thread (and hence are guaranteed to run in order).
+ *   - 0-N worker threads, which run the rest of the request processor pipeline
+ *         on the requests. If configured with 0 worker threads, the primary
+ *         commit processor thread runs the pipeline directly.
+ *
+ * Typical (default) thread counts are: on a 32 core machine, 1 commit
+ * processor thread and 32 worker threads.
+ *
+ * Multi-threading constraints:
+ *   - Each session's requests must be processed in order.
+ *   - Write requests must be processed in zxid order
+ *   - Must ensure no race condition between writes in one session that would
+ *     trigger a watch being set by a read request in another session
+ *
+ * The current implementation solves the third constraint by simply allowing no
+ * read requests to be processed in parallel with write requests.
+ */
+public class CommitProcessor extends ZooKeeperCriticalThread implements RequestProcessor {
+
+<span class="nc" id="L79">    private static final Logger LOG = LoggerFactory.getLogger(CommitProcessor.class);</span>
+
+    /** Default: numCores */
+    public static final String ZOOKEEPER_COMMIT_PROC_NUM_WORKER_THREADS = &quot;zookeeper.commitProcessor.numWorkerThreads&quot;;
+    /** Default worker pool shutdown timeout in ms: 5000 (5s) */
+    public static final String ZOOKEEPER_COMMIT_PROC_SHUTDOWN_TIMEOUT = &quot;zookeeper.commitProcessor.shutdownTimeout&quot;;
+    /** Default max read batch size: -1 to disable the feature */
+    public static final String ZOOKEEPER_COMMIT_PROC_MAX_READ_BATCH_SIZE = &quot;zookeeper.commitProcessor.maxReadBatchSize&quot;;
+    /** Default max commit batch size: 1 */
+    public static final String ZOOKEEPER_COMMIT_PROC_MAX_COMMIT_BATCH_SIZE = &quot;zookeeper.commitProcessor.maxCommitBatchSize&quot;;
+
+    /**
+     * Incoming requests.
+     */
+<span class="nc" id="L93">    protected LinkedBlockingQueue&lt;Request&gt; queuedRequests = new LinkedBlockingQueue&lt;Request&gt;();</span>
+
+    /**
+     * Incoming requests that are waiting on a commit,
+     * contained in order of arrival
+     */
+<span class="nc" id="L99">    protected final LinkedBlockingQueue&lt;Request&gt; queuedWriteRequests = new LinkedBlockingQueue&lt;&gt;();</span>
+
+    /**
+     * The number of read requests currently held in all session queues
+     */
+<span class="nc" id="L104">    private AtomicInteger numReadQueuedRequests = new AtomicInteger(0);</span>
+
+    /**
+     * The number of quorum requests currently held in all session queued
+     */
+<span class="nc" id="L109">    private AtomicInteger numWriteQueuedRequests = new AtomicInteger(0);</span>
+
+    /**
+     * Requests that have been committed.
+     */
+<span class="nc" id="L114">    protected final LinkedBlockingQueue&lt;Request&gt; committedRequests = new LinkedBlockingQueue&lt;Request&gt;();</span>
+
+    /**
+     * Requests that we are holding until commit comes in. Keys represent
+     * session ids, each value is a linked list of the session's requests.
+     */
+<span class="nc" id="L120">    protected final Map&lt;Long, Deque&lt;Request&gt;&gt; pendingRequests = new HashMap&lt;&gt;(10000);</span>
+
+    /** The number of requests currently being processed */
+<span class="nc" id="L123">    protected final AtomicInteger numRequestsProcessing = new AtomicInteger(0);</span>
+
+    RequestProcessor nextProcessor;
+
+    /** For testing purposes, we use a separated stopping condition for the
+     * outer loop.*/
+<span class="nc" id="L129">    protected volatile boolean stoppedMainLoop = true;</span>
+<span class="nc" id="L130">    protected volatile boolean stopped = true;</span>
+    private long workerShutdownTimeoutMS;
+    protected WorkerService workerPool;
+<span class="nc" id="L133">    private Object emptyPoolSync = new Object();</span>
+
+    /**
+     * Max number of reads to process from queuedRequests before switching to
+     * processing commits. If the value is negative, we switch whenever we have
+     * a local write, and pending commits.
+     * A high read batch size will delay commit processing causing us to
+     * serve stale data.
+     */
+    private static volatile int maxReadBatchSize;
+    /**
+     * Max number of commits to process before processing reads. We will try to
+     * process as many remote/local commits as we can till we reach this
+     * count.
+     * A high commit batch size will delay reads while processing more commits.
+     * A low commit batch size will favor reads.
+     */
+    private static volatile int maxCommitBatchSize;
+
+    /**
+     * This flag indicates whether we need to wait for a response to come back from the
+     * leader or we just let the sync operation flow through like a read. The flag will
+     * be false if the CommitProcessor is in a Leader pipeline.
+     */
+    boolean matchSyncs;
+
+    public CommitProcessor(RequestProcessor nextProcessor, String id, boolean matchSyncs, ZooKeeperServerListener listener) {
+<span class="nc" id="L160">        super(&quot;CommitProcessor:&quot; + id, listener);</span>
+<span class="nc" id="L161">        this.nextProcessor = nextProcessor;</span>
+<span class="nc" id="L162">        this.matchSyncs = matchSyncs;</span>
+<span class="nc" id="L163">    }</span>
+
+    private boolean isProcessingRequest() {
+<span class="nc bnc" id="L166" title="All 2 branches missed.">        return numRequestsProcessing.get() != 0;</span>
+    }
+
+    protected boolean needCommit(Request request) {
+<span class="nc bnc" id="L170" title="All 2 branches missed.">        if (request.isThrottled()) {</span>
+<span class="nc" id="L171">          return false;</span>
+        }
+<span class="nc bnc" id="L173" title="All 4 branches missed.">        switch (request.type) {</span>
+        case OpCode.create:
+        case OpCode.create2:
+        case OpCode.createTTL:
+        case OpCode.createContainer:
+        case OpCode.delete:
+        case OpCode.deleteContainer:
+        case OpCode.setData:
+        case OpCode.reconfig:
+        case OpCode.multi:
+        case OpCode.setACL:
+        case OpCode.check:
+<span class="nc" id="L185">            return true;</span>
+        case OpCode.sync:
+<span class="nc" id="L187">            return matchSyncs;</span>
+        case OpCode.createSession:
+        case OpCode.closeSession:
+<span class="nc bnc" id="L190" title="All 2 branches missed.">            return !request.isLocalSession();</span>
+        default:
+<span class="nc" id="L192">            return false;</span>
+        }
+    }
+
+    @Override
+    public void run() {
+        try {
+            /*
+             * In each iteration of the following loop we process at most
+             * requestsToProcess requests of queuedRequests. We have to limit
+             * the number of request we poll from queuedRequests, since it is
+             * possible to endlessly poll read requests from queuedRequests, and
+             * that will lead to a starvation of non-local committed requests.
+             */
+<span class="nc" id="L206">            int requestsToProcess = 0;</span>
+<span class="nc" id="L207">            boolean commitIsWaiting = false;</span>
+            do {
+                /*
+                 * Since requests are placed in the queue before being sent to
+                 * the leader, if commitIsWaiting = true, the commit belongs to
+                 * the first update operation in the queuedRequests or to a
+                 * request from a client on another server (i.e., the order of
+                 * the following two lines is important!).
+                 */
+<span class="nc bnc" id="L216" title="All 2 branches missed.">                commitIsWaiting = !committedRequests.isEmpty();</span>
+<span class="nc" id="L217">                requestsToProcess = queuedRequests.size();</span>
+                // Avoid sync if we have something to do
+<span class="nc bnc" id="L219" title="All 4 branches missed.">                if (requestsToProcess == 0 &amp;&amp; !commitIsWaiting) {</span>
+                    // Waiting for requests to process
+<span class="nc" id="L221">                    synchronized (this) {</span>
+<span class="nc bnc" id="L222" title="All 6 branches missed.">                        while (!stopped &amp;&amp; requestsToProcess == 0 &amp;&amp; !commitIsWaiting) {</span>
+<span class="nc" id="L223">                            wait();</span>
+<span class="nc bnc" id="L224" title="All 2 branches missed.">                            commitIsWaiting = !committedRequests.isEmpty();</span>
+<span class="nc" id="L225">                            requestsToProcess = queuedRequests.size();</span>
+                        }
+<span class="nc" id="L227">                    }</span>
+                }
+
+<span class="nc" id="L230">                ServerMetrics.getMetrics().READS_QUEUED_IN_COMMIT_PROCESSOR.add(numReadQueuedRequests.get());</span>
+<span class="nc" id="L231">                ServerMetrics.getMetrics().WRITES_QUEUED_IN_COMMIT_PROCESSOR.add(numWriteQueuedRequests.get());</span>
+<span class="nc" id="L232">                ServerMetrics.getMetrics().COMMITS_QUEUED_IN_COMMIT_PROCESSOR.add(committedRequests.size());</span>
+
+<span class="nc" id="L234">                long time = Time.currentElapsedTime();</span>
+
+                /*
+                 * Processing up to requestsToProcess requests from the incoming
+                 * queue (queuedRequests). If maxReadBatchSize is set then no
+                 * commits will be processed until maxReadBatchSize number of
+                 * reads are processed (or no more reads remain in the queue).
+                 * After the loop a single committed request is processed if
+                 * one is waiting (or a batch of commits if maxCommitBatchSize
+                 * is set).
+                 */
+                Request request;
+<span class="nc" id="L246">                int readsProcessed = 0;</span>
+<span class="nc bnc" id="L247" title="All 8 branches missed.">                while (!stopped</span>
+                       &amp;&amp; requestsToProcess &gt; 0
+                       &amp;&amp; (maxReadBatchSize &lt; 0 || readsProcessed &lt;= maxReadBatchSize)
+<span class="nc bnc" id="L250" title="All 2 branches missed.">                       &amp;&amp; (request = queuedRequests.poll()) != null) {</span>
+<span class="nc" id="L251">                    requestsToProcess--;</span>
+<span class="nc bnc" id="L252" title="All 4 branches missed.">                    if (needCommit(request) || pendingRequests.containsKey(request.sessionId)) {</span>
+                        // Add request to pending
+<span class="nc" id="L254">                        Deque&lt;Request&gt; requests = pendingRequests.computeIfAbsent(request.sessionId, sid -&gt; new ArrayDeque&lt;&gt;());</span>
+<span class="nc" id="L255">                        requests.addLast(request);</span>
+<span class="nc" id="L256">                        ServerMetrics.getMetrics().REQUESTS_IN_SESSION_QUEUE.add(requests.size());</span>
+<span class="nc" id="L257">                    } else {</span>
+<span class="nc" id="L258">                        readsProcessed++;</span>
+<span class="nc" id="L259">                        numReadQueuedRequests.decrementAndGet();</span>
+<span class="nc" id="L260">                        sendToNextProcessor(request);</span>
+                    }
+                    /*
+                     * Stop feeding the pool if there is a local pending update
+                     * and a committed request that is ready. Once we have a
+                     * pending request with a waiting committed request, we know
+                     * we can process the committed one. This is because commits
+                     * for local requests arrive in the order they appeared in
+                     * the queue, so if we have a pending request and a
+                     * committed request, the committed request must be for that
+                     * pending write or for a write originating at a different
+                     * server. We skip this if maxReadBatchSize is set.
+                     */
+<span class="nc bnc" id="L273" title="All 6 branches missed.">                    if (maxReadBatchSize &lt; 0 &amp;&amp; !pendingRequests.isEmpty() &amp;&amp; !committedRequests.isEmpty()) {</span>
+                        /*
+                         * We set commitIsWaiting so that we won't check
+                         * committedRequests again.
+                         */
+<span class="nc" id="L278">                        commitIsWaiting = true;</span>
+<span class="nc" id="L279">                        break;</span>
+                    }
+                }
+<span class="nc" id="L282">                ServerMetrics.getMetrics().READS_ISSUED_IN_COMMIT_PROC.add(readsProcessed);</span>
+
+<span class="nc bnc" id="L284" title="All 2 branches missed.">                if (!commitIsWaiting) {</span>
+<span class="nc bnc" id="L285" title="All 2 branches missed.">                    commitIsWaiting = !committedRequests.isEmpty();</span>
+                }
+
+                /*
+                 * Handle commits, if any.
+                 */
+<span class="nc bnc" id="L291" title="All 4 branches missed.">                if (commitIsWaiting &amp;&amp; !stopped) {</span>
+                    /*
+                     * Drain outstanding reads
+                     */
+<span class="nc" id="L295">                    waitForEmptyPool();</span>
+
+<span class="nc bnc" id="L297" title="All 2 branches missed.">                    if (stopped) {</span>
+<span class="nc" id="L298">                        return;</span>
+                    }
+
+<span class="nc" id="L301">                    int commitsToProcess = maxCommitBatchSize;</span>
+
+                    /*
+                     * Loop through all the commits, and try to drain them.
+                     */
+<span class="nc" id="L306">                    Set&lt;Long&gt; queuesToDrain = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L307">                    long startWriteTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L308">                    int commitsProcessed = 0;</span>
+<span class="nc bnc" id="L309" title="All 6 branches missed.">                    while (commitIsWaiting &amp;&amp; !stopped &amp;&amp; commitsToProcess &gt; 0) {</span>
+
+                        // Process committed head
+<span class="nc" id="L312">                        request = committedRequests.peek();</span>
+
+<span class="nc bnc" id="L314" title="All 2 branches missed.">                        if (request.isThrottled()) {</span>
+<span class="nc" id="L315">                            LOG.error(&quot;Throttled request in committed pool: {}. Exiting.&quot;, request);</span>
+<span class="nc" id="L316">                            ServiceUtils.requestSystemExit(ExitCode.UNEXPECTED_ERROR.getValue());</span>
+                        }
+
+                        /*
+                         * Check if this is a local write request is pending,
+                         * if so, update it with the committed info. If the commit matches
+                         * the first write queued in the blockedRequestQueue, we know this is
+                         * a commit for a local write, as commits are received in order. Else
+                         * it must be a commit for a remote write.
+                         */
+<span class="nc bnc" id="L326" title="All 2 branches missed.">                        if (!queuedWriteRequests.isEmpty()</span>
+<span class="nc bnc" id="L327" title="All 2 branches missed.">                            &amp;&amp; queuedWriteRequests.peek().sessionId == request.sessionId</span>
+<span class="nc bnc" id="L328" title="All 2 branches missed.">                            &amp;&amp; queuedWriteRequests.peek().cxid == request.cxid) {</span>
+                            /*
+                             * Commit matches the earliest write in our write queue.
+                             */
+<span class="nc" id="L332">                            Deque&lt;Request&gt; sessionQueue = pendingRequests.get(request.sessionId);</span>
+<span class="nc" id="L333">                            ServerMetrics.getMetrics().PENDING_SESSION_QUEUE_SIZE.add(pendingRequests.size());</span>
+<span class="nc bnc" id="L334" title="All 6 branches missed.">                            if (sessionQueue == null || sessionQueue.isEmpty() || !needCommit(sessionQueue.peek())) {</span>
+                                /*
+                                 * Can't process this write yet.
+                                 * Either there are reads pending in this session, or we
+                                 * haven't gotten to this write yet.
+                                 */
+<span class="nc" id="L340">                                break;</span>
+                            } else {
+<span class="nc" id="L342">                                ServerMetrics.getMetrics().REQUESTS_IN_SESSION_QUEUE.add(sessionQueue.size());</span>
+                                // If session queue != null, then it is also not empty.
+<span class="nc" id="L344">                                Request topPending = sessionQueue.poll();</span>
+                                /*
+                                 * Generally, we want to send to the next processor our version of the request,
+                                 * since it contains the session information that is needed for post update processing.
+                                 * In more details, when a request is in the local queue, there is (or could be) a client
+                                 * attached to this server waiting for a response, and there is other bookkeeping of
+                                 * requests that are outstanding and have originated from this server
+                                 * (e.g., for setting the max outstanding requests) - we need to update this info when an
+                                 * outstanding request completes. Note that in the other case, the operation
+                                 * originated from a different server and there is no local bookkeeping or a local client
+                                 * session that needs to be notified.
+                                 */
+<span class="nc" id="L356">                                topPending.setHdr(request.getHdr());</span>
+<span class="nc" id="L357">                                topPending.setTxn(request.getTxn());</span>
+<span class="nc" id="L358">                                topPending.setTxnDigest(request.getTxnDigest());</span>
+<span class="nc" id="L359">                                topPending.zxid = request.zxid;</span>
+<span class="nc" id="L360">                                topPending.commitRecvTime = request.commitRecvTime;</span>
+<span class="nc" id="L361">                                request = topPending;</span>
+<span class="nc bnc" id="L362" title="All 2 branches missed.">                                if (request.isThrottled()) {</span>
+<span class="nc" id="L363">                                    LOG.error(&quot;Throttled request in committed &amp; pending pool: {}. Exiting.&quot;, request);</span>
+<span class="nc" id="L364">                                    ServiceUtils.requestSystemExit(ExitCode.UNEXPECTED_ERROR.getValue());</span>
+                                }
+                                // Only decrement if we take a request off the queue.
+<span class="nc" id="L367">                                numWriteQueuedRequests.decrementAndGet();</span>
+<span class="nc" id="L368">                                queuedWriteRequests.poll();</span>
+<span class="nc" id="L369">                                queuesToDrain.add(request.sessionId);</span>
+                            }
+                        }
+                        /*
+                         * Pull the request off the commit queue, now that we are going
+                         * to process it.
+                         */
+<span class="nc" id="L376">                        committedRequests.remove();</span>
+<span class="nc" id="L377">                        commitsToProcess--;</span>
+<span class="nc" id="L378">                        commitsProcessed++;</span>
+
+                        // Process the write inline.
+<span class="nc" id="L381">                        processWrite(request);</span>
+
+<span class="nc bnc" id="L383" title="All 2 branches missed.">                        commitIsWaiting = !committedRequests.isEmpty();</span>
+                    }
+<span class="nc" id="L385">                    ServerMetrics.getMetrics().WRITE_BATCH_TIME_IN_COMMIT_PROCESSOR</span>
+<span class="nc" id="L386">                        .add(Time.currentElapsedTime() - startWriteTime);</span>
+<span class="nc" id="L387">                    ServerMetrics.getMetrics().WRITES_ISSUED_IN_COMMIT_PROC.add(commitsProcessed);</span>
+
+                    /*
+                     * Process following reads if any, remove session queue(s) if
+                     * empty.
+                     */
+<span class="nc" id="L393">                    readsProcessed = 0;</span>
+<span class="nc bnc" id="L394" title="All 2 branches missed.">                    for (Long sessionId : queuesToDrain) {</span>
+<span class="nc" id="L395">                        Deque&lt;Request&gt; sessionQueue = pendingRequests.get(sessionId);</span>
+<span class="nc" id="L396">                        int readsAfterWrite = 0;</span>
+<span class="nc bnc" id="L397" title="All 6 branches missed.">                        while (!stopped &amp;&amp; !sessionQueue.isEmpty() &amp;&amp; !needCommit(sessionQueue.peek())) {</span>
+<span class="nc" id="L398">                            numReadQueuedRequests.decrementAndGet();</span>
+<span class="nc" id="L399">                            sendToNextProcessor(sessionQueue.poll());</span>
+<span class="nc" id="L400">                            readsAfterWrite++;</span>
+                        }
+<span class="nc" id="L402">                        ServerMetrics.getMetrics().READS_AFTER_WRITE_IN_SESSION_QUEUE.add(readsAfterWrite);</span>
+<span class="nc" id="L403">                        readsProcessed += readsAfterWrite;</span>
+
+                        // Remove empty queues
+<span class="nc bnc" id="L406" title="All 2 branches missed.">                        if (sessionQueue.isEmpty()) {</span>
+<span class="nc" id="L407">                            pendingRequests.remove(sessionId);</span>
+                        }
+<span class="nc" id="L409">                    }</span>
+<span class="nc" id="L410">                    ServerMetrics.getMetrics().SESSION_QUEUES_DRAINED.add(queuesToDrain.size());</span>
+<span class="nc" id="L411">                    ServerMetrics.getMetrics().READ_ISSUED_FROM_SESSION_QUEUE.add(readsProcessed);</span>
+                }
+
+<span class="nc" id="L414">                ServerMetrics.getMetrics().COMMIT_PROCESS_TIME.add(Time.currentElapsedTime() - time);</span>
+<span class="nc" id="L415">                endOfIteration();</span>
+<span class="nc bnc" id="L416" title="All 2 branches missed.">            } while (!stoppedMainLoop);</span>
+<span class="nc" id="L417">        } catch (Throwable e) {</span>
+<span class="nc" id="L418">            handleException(this.getName(), e);</span>
+<span class="nc" id="L419">        }</span>
+<span class="nc" id="L420">        LOG.info(&quot;CommitProcessor exited loop!&quot;);</span>
+<span class="nc" id="L421">    }</span>
+
+    //for test only
+    protected void endOfIteration() {
+
+<span class="nc" id="L426">    }</span>
+
+    protected void waitForEmptyPool() throws InterruptedException {
+<span class="nc" id="L429">        int numRequestsInProcess = numRequestsProcessing.get();</span>
+<span class="nc bnc" id="L430" title="All 2 branches missed.">        if (numRequestsInProcess != 0) {</span>
+<span class="nc" id="L431">            ServerMetrics.getMetrics().CONCURRENT_REQUEST_PROCESSING_IN_COMMIT_PROCESSOR.add(numRequestsInProcess);</span>
+        }
+
+<span class="nc" id="L434">        long startWaitTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L435">        synchronized (emptyPoolSync) {</span>
+<span class="nc bnc" id="L436" title="All 4 branches missed.">            while ((!stopped) &amp;&amp; isProcessingRequest()) {</span>
+<span class="nc" id="L437">                emptyPoolSync.wait();</span>
+            }
+<span class="nc" id="L439">        }</span>
+<span class="nc" id="L440">        ServerMetrics.getMetrics().TIME_WAITING_EMPTY_POOL_IN_COMMIT_PROCESSOR_READ</span>
+<span class="nc" id="L441">            .add(Time.currentElapsedTime() - startWaitTime);</span>
+<span class="nc" id="L442">    }</span>
+
+    @Override
+    public void start() {
+<span class="nc" id="L446">        int numCores = Runtime.getRuntime().availableProcessors();</span>
+<span class="nc" id="L447">        int numWorkerThreads = Integer.getInteger(ZOOKEEPER_COMMIT_PROC_NUM_WORKER_THREADS, numCores);</span>
+<span class="nc" id="L448">        workerShutdownTimeoutMS = Long.getLong(ZOOKEEPER_COMMIT_PROC_SHUTDOWN_TIMEOUT, 5000);</span>
+
+<span class="nc" id="L450">        initBatchSizes();</span>
+
+<span class="nc" id="L452">        LOG.info(</span>
+            &quot;Configuring CommitProcessor with {} worker threads.&quot;,
+<span class="nc bnc" id="L454" title="All 2 branches missed.">            numWorkerThreads &gt; 0 ? numWorkerThreads : &quot;no&quot;);</span>
+<span class="nc bnc" id="L455" title="All 2 branches missed.">        if (workerPool == null) {</span>
+<span class="nc" id="L456">            workerPool = new WorkerService(&quot;CommitProcWork&quot;, numWorkerThreads, true);</span>
+        }
+<span class="nc" id="L458">        stopped = false;</span>
+<span class="nc" id="L459">        stoppedMainLoop = false;</span>
+<span class="nc" id="L460">        super.start();</span>
+<span class="nc" id="L461">    }</span>
+
+    /**
+     * Schedule final request processing; if a worker thread pool is not being
+     * used, processing is done directly by this thread.
+     */
+    private void sendToNextProcessor(Request request) {
+<span class="nc" id="L468">        numRequestsProcessing.incrementAndGet();</span>
+<span class="nc" id="L469">        CommitWorkRequest workRequest = new CommitWorkRequest(request);</span>
+<span class="nc" id="L470">        workerPool.schedule(workRequest, request.sessionId);</span>
+<span class="nc" id="L471">    }</span>
+
+    private void processWrite(Request request) throws RequestProcessorException {
+<span class="nc" id="L474">        processCommitMetrics(request, true);</span>
+
+<span class="nc" id="L476">        long timeBeforeFinalProc = Time.currentElapsedTime();</span>
+<span class="nc" id="L477">        nextProcessor.processRequest(request);</span>
+<span class="nc" id="L478">        ServerMetrics.getMetrics().WRITE_FINAL_PROC_TIME.add(Time.currentElapsedTime() - timeBeforeFinalProc);</span>
+<span class="nc" id="L479">    }</span>
+
+    private static void initBatchSizes() {
+<span class="nc" id="L482">        maxReadBatchSize = Integer.getInteger(ZOOKEEPER_COMMIT_PROC_MAX_READ_BATCH_SIZE, -1);</span>
+<span class="nc" id="L483">        maxCommitBatchSize = Integer.getInteger(ZOOKEEPER_COMMIT_PROC_MAX_COMMIT_BATCH_SIZE, 1);</span>
+
+<span class="nc bnc" id="L485" title="All 2 branches missed.">        if (maxCommitBatchSize &lt;= 0) {</span>
+<span class="nc" id="L486">            String errorMsg = &quot;maxCommitBatchSize must be positive, was &quot; + maxCommitBatchSize;</span>
+<span class="nc" id="L487">            throw new IllegalArgumentException(errorMsg);</span>
+        }
+
+<span class="nc" id="L490">        LOG.info</span>
+<span class="nc" id="L491">            (&quot;Configuring CommitProcessor with readBatchSize {} commitBatchSize {}&quot;,</span>
+<span class="nc" id="L492">             maxReadBatchSize,</span>
+<span class="nc" id="L493">             maxCommitBatchSize);</span>
+<span class="nc" id="L494">    }</span>
+
+    private static void processCommitMetrics(Request request, boolean isWrite) {
+<span class="nc bnc" id="L497" title="All 2 branches missed.">        if (isWrite) {</span>
+<span class="nc bnc" id="L498" title="All 4 branches missed.">            if (request.commitProcQueueStartTime != -1 &amp;&amp; request.commitRecvTime != -1) {</span>
+                // Locally issued writes.
+<span class="nc" id="L500">                long currentTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L501">                ServerMetrics.getMetrics().WRITE_COMMITPROC_TIME.add(currentTime - request.commitProcQueueStartTime);</span>
+<span class="nc" id="L502">                ServerMetrics.getMetrics().LOCAL_WRITE_COMMITTED_TIME.add(currentTime - request.commitRecvTime);</span>
+<span class="nc bnc" id="L503" title="All 2 branches missed.">            } else if (request.commitRecvTime != -1) {</span>
+                // Writes issued by other servers.
+<span class="nc" id="L505">                ServerMetrics.getMetrics().SERVER_WRITE_COMMITTED_TIME</span>
+<span class="nc" id="L506">                    .add(Time.currentElapsedTime() - request.commitRecvTime);</span>
+            }
+        } else {
+<span class="nc bnc" id="L509" title="All 2 branches missed.">            if (request.commitProcQueueStartTime != -1) {</span>
+<span class="nc" id="L510">                ServerMetrics.getMetrics().READ_COMMITPROC_TIME</span>
+<span class="nc" id="L511">                    .add(Time.currentElapsedTime() - request.commitProcQueueStartTime);</span>
+            }
+        }
+<span class="nc" id="L514">    }</span>
+
+    public static int getMaxReadBatchSize() {
+<span class="nc" id="L517">        return maxReadBatchSize;</span>
+    }
+
+    public static int getMaxCommitBatchSize() {
+<span class="nc" id="L521">        return maxCommitBatchSize;</span>
+    }
+
+    public static void setMaxReadBatchSize(int size) {
+<span class="nc" id="L525">        maxReadBatchSize = size;</span>
+<span class="nc" id="L526">        LOG.info(&quot;Configuring CommitProcessor with readBatchSize {}&quot;, maxReadBatchSize);</span>
+<span class="nc" id="L527">    }</span>
+
+    public static void setMaxCommitBatchSize(int size) {
+<span class="nc bnc" id="L530" title="All 2 branches missed.">        if (size &gt; 0) {</span>
+<span class="nc" id="L531">            maxCommitBatchSize = size;</span>
+<span class="nc" id="L532">            LOG.info(&quot;Configuring CommitProcessor with commitBatchSize {}&quot;, maxCommitBatchSize);</span>
+        }
+<span class="nc" id="L534">    }</span>
+
+    /**
+     * CommitWorkRequest is a small wrapper class to allow
+     * downstream processing to be run using the WorkerService
+     */
+    private class CommitWorkRequest extends WorkerService.WorkRequest {
+
+        private final Request request;
+
+<span class="nc" id="L544">        CommitWorkRequest(Request request) {</span>
+<span class="nc" id="L545">            this.request = request;</span>
+<span class="nc" id="L546">        }</span>
+
+        @Override
+        public void cleanup() {
+<span class="nc bnc" id="L550" title="All 2 branches missed.">            if (!stopped) {</span>
+<span class="nc" id="L551">                LOG.error(&quot;Exception thrown by downstream processor, unable to continue.&quot;);</span>
+<span class="nc" id="L552">                CommitProcessor.this.halt();</span>
+            }
+<span class="nc" id="L554">        }</span>
+
+        public void doWork() throws RequestProcessorException {
+            try {
+<span class="nc" id="L558">                processCommitMetrics(request, needCommit(request));</span>
+
+<span class="nc" id="L560">                long timeBeforeFinalProc = Time.currentElapsedTime();</span>
+<span class="nc" id="L561">                nextProcessor.processRequest(request);</span>
+<span class="nc bnc" id="L562" title="All 2 branches missed.">                if (needCommit(request)) {</span>
+<span class="nc" id="L563">                    ServerMetrics.getMetrics().WRITE_FINAL_PROC_TIME</span>
+<span class="nc" id="L564">                        .add(Time.currentElapsedTime() - timeBeforeFinalProc);</span>
+                } else {
+<span class="nc" id="L566">                    ServerMetrics.getMetrics().READ_FINAL_PROC_TIME</span>
+<span class="nc" id="L567">                        .add(Time.currentElapsedTime() - timeBeforeFinalProc);</span>
+                }
+
+            } finally {
+
+<span class="nc bnc" id="L572" title="All 2 branches missed.">                if (numRequestsProcessing.decrementAndGet() == 0) {</span>
+<span class="nc" id="L573">                    wakeupOnEmpty();</span>
+                }
+            }
+<span class="nc" id="L576">        }</span>
+
+    }
+
+    @SuppressFBWarnings(&quot;NN_NAKED_NOTIFY&quot;)
+    private synchronized void wakeup() {
+<span class="nc" id="L582">        notifyAll();</span>
+<span class="nc" id="L583">    }</span>
+
+    private void wakeupOnEmpty() {
+<span class="nc" id="L586">        synchronized (emptyPoolSync) {</span>
+<span class="nc" id="L587">            emptyPoolSync.notifyAll();</span>
+<span class="nc" id="L588">        }</span>
+<span class="nc" id="L589">    }</span>
+
+    public void commit(Request request) {
+<span class="nc bnc" id="L592" title="All 4 branches missed.">        if (stopped || request == null) {</span>
+<span class="nc" id="L593">            return;</span>
+        }
+<span class="nc" id="L595">        LOG.debug(&quot;Committing request:: {}&quot;, request);</span>
+<span class="nc" id="L596">        request.commitRecvTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L597">        ServerMetrics.getMetrics().COMMITS_QUEUED.add(1);</span>
+<span class="nc" id="L598">        committedRequests.add(request);</span>
+<span class="nc" id="L599">        wakeup();</span>
+<span class="nc" id="L600">    }</span>
+
+    @Override
+    public void processRequest(Request request) {
+<span class="nc bnc" id="L604" title="All 2 branches missed.">        if (stopped) {</span>
+<span class="nc" id="L605">            return;</span>
+        }
+<span class="nc" id="L607">        LOG.debug(&quot;Processing request:: {}&quot;, request);</span>
+<span class="nc" id="L608">        request.commitProcQueueStartTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L609">        queuedRequests.add(request);</span>
+        // If the request will block, add it to the queue of blocking requests
+<span class="nc bnc" id="L611" title="All 2 branches missed.">        if (needCommit(request)) {</span>
+<span class="nc" id="L612">            queuedWriteRequests.add(request);</span>
+<span class="nc" id="L613">            numWriteQueuedRequests.incrementAndGet();</span>
+        } else {
+<span class="nc" id="L615">            numReadQueuedRequests.incrementAndGet();</span>
+        }
+<span class="nc" id="L617">        wakeup();</span>
+<span class="nc" id="L618">    }</span>
+
+    private void halt() {
+<span class="nc" id="L621">        stoppedMainLoop = true;</span>
+<span class="nc" id="L622">        stopped = true;</span>
+<span class="nc" id="L623">        wakeupOnEmpty();</span>
+<span class="nc" id="L624">        wakeup();</span>
+<span class="nc" id="L625">        queuedRequests.clear();</span>
+<span class="nc bnc" id="L626" title="All 2 branches missed.">        if (workerPool != null) {</span>
+<span class="nc" id="L627">            workerPool.stop();</span>
+        }
+<span class="nc" id="L629">    }</span>
+
+    public void shutdown() {
+<span class="nc" id="L632">        LOG.info(&quot;Shutting down&quot;);</span>
+
+<span class="nc" id="L634">        halt();</span>
+
+<span class="nc bnc" id="L636" title="All 2 branches missed.">        if (workerPool != null) {</span>
+<span class="nc" id="L637">            workerPool.join(workerShutdownTimeoutMS);</span>
+        }
+
+<span class="nc bnc" id="L640" title="All 2 branches missed.">        if (nextProcessor != null) {</span>
+<span class="nc" id="L641">            nextProcessor.shutdown();</span>
+        }
+<span class="nc" id="L643">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

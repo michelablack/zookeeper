@@ -1,0 +1,697 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FinalRequestProcessor.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">FinalRequestProcessor.java</span></div><h1>FinalRequestProcessor.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import org.apache.jute.Record;
+import org.apache.zookeeper.ClientCnxn;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.Code;
+import org.apache.zookeeper.KeeperException.SessionMovedException;
+import org.apache.zookeeper.MultiOperationRecord;
+import org.apache.zookeeper.MultiResponse;
+import org.apache.zookeeper.Op;
+import org.apache.zookeeper.OpResult;
+import org.apache.zookeeper.OpResult.CheckResult;
+import org.apache.zookeeper.OpResult.CreateResult;
+import org.apache.zookeeper.OpResult.DeleteResult;
+import org.apache.zookeeper.OpResult.ErrorResult;
+import org.apache.zookeeper.OpResult.GetChildrenResult;
+import org.apache.zookeeper.OpResult.GetDataResult;
+import org.apache.zookeeper.OpResult.SetDataResult;
+import org.apache.zookeeper.Watcher.WatcherType;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.ZooDefs.OpCode;
+import org.apache.zookeeper.audit.AuditHelper;
+import org.apache.zookeeper.common.Time;
+import org.apache.zookeeper.data.ACL;
+import org.apache.zookeeper.data.Id;
+import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.proto.AddWatchRequest;
+import org.apache.zookeeper.proto.CheckWatchesRequest;
+import org.apache.zookeeper.proto.Create2Response;
+import org.apache.zookeeper.proto.CreateResponse;
+import org.apache.zookeeper.proto.ErrorResponse;
+import org.apache.zookeeper.proto.ExistsRequest;
+import org.apache.zookeeper.proto.ExistsResponse;
+import org.apache.zookeeper.proto.GetACLRequest;
+import org.apache.zookeeper.proto.GetACLResponse;
+import org.apache.zookeeper.proto.GetAllChildrenNumberRequest;
+import org.apache.zookeeper.proto.GetAllChildrenNumberResponse;
+import org.apache.zookeeper.proto.GetChildren2Request;
+import org.apache.zookeeper.proto.GetChildren2Response;
+import org.apache.zookeeper.proto.GetChildrenRequest;
+import org.apache.zookeeper.proto.GetChildrenResponse;
+import org.apache.zookeeper.proto.GetDataRequest;
+import org.apache.zookeeper.proto.GetDataResponse;
+import org.apache.zookeeper.proto.GetEphemeralsRequest;
+import org.apache.zookeeper.proto.GetEphemeralsResponse;
+import org.apache.zookeeper.proto.RemoveWatchesRequest;
+import org.apache.zookeeper.proto.ReplyHeader;
+import org.apache.zookeeper.proto.SetACLResponse;
+import org.apache.zookeeper.proto.SetDataResponse;
+import org.apache.zookeeper.proto.SetWatches;
+import org.apache.zookeeper.proto.SetWatches2;
+import org.apache.zookeeper.proto.SyncRequest;
+import org.apache.zookeeper.proto.SyncResponse;
+import org.apache.zookeeper.proto.WhoAmIResponse;
+import org.apache.zookeeper.server.DataTree.ProcessTxnResult;
+import org.apache.zookeeper.server.quorum.QuorumZooKeeperServer;
+import org.apache.zookeeper.server.util.AuthUtil;
+import org.apache.zookeeper.server.util.RequestPathMetricsCollector;
+import org.apache.zookeeper.txn.ErrorTxn;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This Request processor actually applies any transaction associated with a
+ * request and services any queries. It is always at the end of a
+ * RequestProcessor chain (hence the name), so it does not have a nextProcessor
+ * member.
+ *
+ * This RequestProcessor counts on ZooKeeperServer to populate the
+ * outstandingRequests member of ZooKeeperServer.
+ */
+public class FinalRequestProcessor implements RequestProcessor {
+
+<span class="nc" id="L100">    private static final Logger LOG = LoggerFactory.getLogger(FinalRequestProcessor.class);</span>
+
+    private final RequestPathMetricsCollector requestPathMetricsCollector;
+
+    ZooKeeperServer zks;
+
+<span class="nc" id="L106">    public FinalRequestProcessor(ZooKeeperServer zks) {</span>
+<span class="nc" id="L107">        this.zks = zks;</span>
+<span class="nc" id="L108">        this.requestPathMetricsCollector = zks.getRequestPathMetricsCollector();</span>
+<span class="nc" id="L109">    }</span>
+
+    private ProcessTxnResult applyRequest(Request request) {
+<span class="nc" id="L112">        ProcessTxnResult rc = zks.processTxn(request);</span>
+
+        // ZOOKEEPER-558:
+        // In some cases the server does not close the connection (e.g., closeconn buffer
+        // was not being queued — ZOOKEEPER-558) properly. This happens, for example,
+        // when the client closes the connection. The server should still close the session, though.
+        // Calling closeSession() after losing the cnxn, results in the client close session response being dropped.
+<span class="nc bnc" id="L119" title="All 4 branches missed.">        if (request.type == OpCode.closeSession &amp;&amp; connClosedByClient(request)) {</span>
+            // We need to check if we can close the session id.
+            // Sometimes the corresponding ServerCnxnFactory could be null because
+            // we are just playing diffs from the leader.
+<span class="nc bnc" id="L123" title="All 2 branches missed.">            if (closeSession(zks.serverCnxnFactory, request.sessionId)</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">                || closeSession(zks.secureServerCnxnFactory, request.sessionId)) {</span>
+<span class="nc" id="L125">                return rc;</span>
+            }
+        }
+
+<span class="nc bnc" id="L129" title="All 2 branches missed.">        if (request.getHdr() != null) {</span>
+            /*
+             * Request header is created only by the leader, so this must be
+             * a quorum request. Since we're comparing timestamps across hosts,
+             * this metric may be incorrect. However, it's still a very useful
+             * metric to track in the happy case. If there is clock drift,
+             * the latency can go negative. Note: headers use wall time, not
+             * CLOCK_MONOTONIC.
+             */
+<span class="nc" id="L138">            long propagationLatency = Time.currentWallTime() - request.getHdr().getTime();</span>
+<span class="nc bnc" id="L139" title="All 2 branches missed.">            if (propagationLatency &gt;= 0) {</span>
+<span class="nc" id="L140">                ServerMetrics.getMetrics().PROPAGATION_LATENCY.add(propagationLatency);</span>
+            }
+        }
+
+<span class="nc" id="L144">        return rc;</span>
+    }
+
+    public void processRequest(Request request) {
+<span class="nc" id="L148">        LOG.debug(&quot;Processing request:: {}&quot;, request);</span>
+
+<span class="nc bnc" id="L150" title="All 2 branches missed.">        if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L151">            long traceMask = ZooTrace.CLIENT_REQUEST_TRACE_MASK;</span>
+<span class="nc bnc" id="L152" title="All 2 branches missed.">            if (request.type == OpCode.ping) {</span>
+<span class="nc" id="L153">                traceMask = ZooTrace.SERVER_PING_TRACE_MASK;</span>
+            }
+<span class="nc" id="L155">            ZooTrace.logRequest(LOG, traceMask, 'E', request, &quot;&quot;);</span>
+        }
+<span class="nc" id="L157">        ProcessTxnResult rc = null;</span>
+<span class="nc bnc" id="L158" title="All 2 branches missed.">        if (!request.isThrottled()) {</span>
+<span class="nc" id="L159">          rc = applyRequest(request);</span>
+        }
+<span class="nc bnc" id="L161" title="All 2 branches missed.">        if (request.cnxn == null) {</span>
+<span class="nc" id="L162">            return;</span>
+        }
+<span class="nc" id="L164">        ServerCnxn cnxn = request.cnxn;</span>
+
+<span class="nc" id="L166">        long lastZxid = zks.getZKDatabase().getDataTreeLastProcessedZxid();</span>
+
+<span class="nc" id="L168">        String lastOp = &quot;NA&quot;;</span>
+        // Notify ZooKeeperServer that the request has finished so that it can
+        // update any request accounting/throttling limits
+<span class="nc" id="L171">        zks.decInProcess();</span>
+<span class="nc" id="L172">        zks.requestFinished(request);</span>
+<span class="nc" id="L173">        Code err = Code.OK;</span>
+<span class="nc" id="L174">        Record rsp = null;</span>
+<span class="nc" id="L175">        String path = null;</span>
+<span class="nc" id="L176">        int responseSize = 0;</span>
+        try {
+<span class="nc bnc" id="L178" title="All 4 branches missed.">            if (request.getHdr() != null &amp;&amp; request.getHdr().getType() == OpCode.error) {</span>
+<span class="nc" id="L179">                AuditHelper.addAuditLog(request, rc, true);</span>
+                /*
+                 * When local session upgrading is disabled, leader will
+                 * reject the ephemeral node creation due to session expire.
+                 * However, if this is the follower that issue the request,
+                 * it will have the correct error code, so we should use that
+                 * and report to user
+                 */
+<span class="nc bnc" id="L187" title="All 2 branches missed.">                if (request.getException() != null) {</span>
+<span class="nc" id="L188">                    throw request.getException();</span>
+                } else {
+<span class="nc" id="L190">                    throw KeeperException.create(KeeperException.Code.get(((ErrorTxn) request.getTxn()).getErr()));</span>
+                }
+            }
+
+<span class="nc" id="L194">            KeeperException ke = request.getException();</span>
+<span class="nc bnc" id="L195" title="All 2 branches missed.">            if (ke instanceof SessionMovedException) {</span>
+<span class="nc" id="L196">                throw ke;</span>
+            }
+<span class="nc bnc" id="L198" title="All 4 branches missed.">            if (ke != null &amp;&amp; request.type != OpCode.multi) {</span>
+<span class="nc" id="L199">                throw ke;</span>
+            }
+
+<span class="nc" id="L202">            LOG.debug(&quot;{}&quot;, request);</span>
+
+<span class="nc bnc" id="L204" title="All 2 branches missed.">            if (request.isStale()) {</span>
+<span class="nc" id="L205">                ServerMetrics.getMetrics().STALE_REPLIES.add(1);</span>
+            }
+
+<span class="nc bnc" id="L208" title="All 2 branches missed.">            if (request.isThrottled()) {</span>
+<span class="nc" id="L209">              throw KeeperException.create(Code.THROTTLEDOP);</span>
+            }
+
+<span class="nc" id="L212">            AuditHelper.addAuditLog(request, rc);</span>
+
+<span class="nc bnc" id="L214" title="All 27 branches missed.">            switch (request.type) {</span>
+            case OpCode.ping: {
+<span class="nc" id="L216">                lastOp = &quot;PING&quot;;</span>
+<span class="nc" id="L217">                updateStats(request, lastOp, lastZxid);</span>
+
+<span class="nc" id="L219">                responseSize = cnxn.sendResponse(new ReplyHeader(ClientCnxn.PING_XID, lastZxid, 0), null, &quot;response&quot;);</span>
+<span class="nc" id="L220">                return;</span>
+            }
+            case OpCode.createSession: {
+<span class="nc" id="L223">                lastOp = &quot;SESS&quot;;</span>
+<span class="nc" id="L224">                updateStats(request, lastOp, lastZxid);</span>
+
+<span class="nc" id="L226">                zks.finishSessionInit(request.cnxn, true);</span>
+<span class="nc" id="L227">                return;</span>
+            }
+            case OpCode.multi: {
+<span class="nc" id="L230">                lastOp = &quot;MULT&quot;;</span>
+<span class="nc" id="L231">                rsp = new MultiResponse();</span>
+
+<span class="nc bnc" id="L233" title="All 2 branches missed.">                for (ProcessTxnResult subTxnResult : rc.multiResult) {</span>
+
+                    OpResult subResult;
+
+<span class="nc bnc" id="L237" title="All 7 branches missed.">                    switch (subTxnResult.type) {</span>
+                    case OpCode.check:
+<span class="nc" id="L239">                        subResult = new CheckResult();</span>
+<span class="nc" id="L240">                        break;</span>
+                    case OpCode.create:
+<span class="nc" id="L242">                        subResult = new CreateResult(subTxnResult.path);</span>
+<span class="nc" id="L243">                        break;</span>
+                    case OpCode.create2:
+                    case OpCode.createTTL:
+                    case OpCode.createContainer:
+<span class="nc" id="L247">                        subResult = new CreateResult(subTxnResult.path, subTxnResult.stat);</span>
+<span class="nc" id="L248">                        break;</span>
+                    case OpCode.delete:
+                    case OpCode.deleteContainer:
+<span class="nc" id="L251">                        subResult = new DeleteResult();</span>
+<span class="nc" id="L252">                        break;</span>
+                    case OpCode.setData:
+<span class="nc" id="L254">                        subResult = new SetDataResult(subTxnResult.stat);</span>
+<span class="nc" id="L255">                        break;</span>
+                    case OpCode.error:
+<span class="nc" id="L257">                        subResult = new ErrorResult(subTxnResult.err);</span>
+<span class="nc bnc" id="L258" title="All 2 branches missed.">                        if (subTxnResult.err == Code.SESSIONMOVED.intValue()) {</span>
+<span class="nc" id="L259">                            throw new SessionMovedException();</span>
+                        }
+                        break;
+                    default:
+<span class="nc" id="L263">                        throw new IOException(&quot;Invalid type of op&quot;);</span>
+                    }
+
+<span class="nc" id="L266">                    ((MultiResponse) rsp).add(subResult);</span>
+<span class="nc" id="L267">                }</span>
+
+<span class="nc" id="L269">                break;</span>
+            }
+            case OpCode.multiRead: {
+<span class="nc" id="L272">                lastOp = &quot;MLTR&quot;;</span>
+<span class="nc" id="L273">                MultiOperationRecord multiReadRecord = new MultiOperationRecord();</span>
+<span class="nc" id="L274">                ByteBufferInputStream.byteBuffer2Record(request.request, multiReadRecord);</span>
+<span class="nc" id="L275">                rsp = new MultiResponse();</span>
+                OpResult subResult;
+<span class="nc bnc" id="L277" title="All 2 branches missed.">                for (Op readOp : multiReadRecord) {</span>
+                    try {
+                        Record rec;
+<span class="nc bnc" id="L280" title="All 3 branches missed.">                        switch (readOp.getType()) {</span>
+                        case OpCode.getChildren:
+<span class="nc" id="L282">                            rec = handleGetChildrenRequest(readOp.toRequestRecord(), cnxn, request.authInfo);</span>
+<span class="nc" id="L283">                            subResult = new GetChildrenResult(((GetChildrenResponse) rec).getChildren());</span>
+<span class="nc" id="L284">                            break;</span>
+                        case OpCode.getData:
+<span class="nc" id="L286">                            rec = handleGetDataRequest(readOp.toRequestRecord(), cnxn, request.authInfo);</span>
+<span class="nc" id="L287">                            GetDataResponse gdr = (GetDataResponse) rec;</span>
+<span class="nc" id="L288">                            subResult = new GetDataResult(gdr.getData(), gdr.getStat());</span>
+<span class="nc" id="L289">                            break;</span>
+                        default:
+<span class="nc" id="L291">                            throw new IOException(&quot;Invalid type of readOp&quot;);</span>
+                        }
+<span class="nc" id="L293">                    } catch (KeeperException e) {</span>
+<span class="nc" id="L294">                        subResult = new ErrorResult(e.code().intValue());</span>
+<span class="nc" id="L295">                    }</span>
+<span class="nc" id="L296">                    ((MultiResponse) rsp).add(subResult);</span>
+<span class="nc" id="L297">                }</span>
+<span class="nc" id="L298">                break;</span>
+            }
+            case OpCode.create: {
+<span class="nc" id="L301">                lastOp = &quot;CREA&quot;;</span>
+<span class="nc" id="L302">                rsp = new CreateResponse(rc.path);</span>
+<span class="nc" id="L303">                err = Code.get(rc.err);</span>
+<span class="nc" id="L304">                requestPathMetricsCollector.registerRequest(request.type, rc.path);</span>
+<span class="nc" id="L305">                break;</span>
+            }
+            case OpCode.create2:
+            case OpCode.createTTL:
+            case OpCode.createContainer: {
+<span class="nc" id="L310">                lastOp = &quot;CREA&quot;;</span>
+<span class="nc" id="L311">                rsp = new Create2Response(rc.path, rc.stat);</span>
+<span class="nc" id="L312">                err = Code.get(rc.err);</span>
+<span class="nc" id="L313">                requestPathMetricsCollector.registerRequest(request.type, rc.path);</span>
+<span class="nc" id="L314">                break;</span>
+            }
+            case OpCode.delete:
+            case OpCode.deleteContainer: {
+<span class="nc" id="L318">                lastOp = &quot;DELE&quot;;</span>
+<span class="nc" id="L319">                err = Code.get(rc.err);</span>
+<span class="nc" id="L320">                requestPathMetricsCollector.registerRequest(request.type, rc.path);</span>
+<span class="nc" id="L321">                break;</span>
+            }
+            case OpCode.setData: {
+<span class="nc" id="L324">                lastOp = &quot;SETD&quot;;</span>
+<span class="nc" id="L325">                rsp = new SetDataResponse(rc.stat);</span>
+<span class="nc" id="L326">                err = Code.get(rc.err);</span>
+<span class="nc" id="L327">                requestPathMetricsCollector.registerRequest(request.type, rc.path);</span>
+<span class="nc" id="L328">                break;</span>
+            }
+            case OpCode.reconfig: {
+<span class="nc" id="L331">                lastOp = &quot;RECO&quot;;</span>
+<span class="nc" id="L332">                rsp = new GetDataResponse(</span>
+<span class="nc" id="L333">                    ((QuorumZooKeeperServer) zks).self.getQuorumVerifier().toString().getBytes(UTF_8),</span>
+                    rc.stat);
+<span class="nc" id="L335">                err = Code.get(rc.err);</span>
+<span class="nc" id="L336">                break;</span>
+            }
+            case OpCode.setACL: {
+<span class="nc" id="L339">                lastOp = &quot;SETA&quot;;</span>
+<span class="nc" id="L340">                rsp = new SetACLResponse(rc.stat);</span>
+<span class="nc" id="L341">                err = Code.get(rc.err);</span>
+<span class="nc" id="L342">                requestPathMetricsCollector.registerRequest(request.type, rc.path);</span>
+<span class="nc" id="L343">                break;</span>
+            }
+            case OpCode.closeSession: {
+<span class="nc" id="L346">                lastOp = &quot;CLOS&quot;;</span>
+<span class="nc" id="L347">                err = Code.get(rc.err);</span>
+<span class="nc" id="L348">                break;</span>
+            }
+            case OpCode.sync: {
+<span class="nc" id="L351">                lastOp = &quot;SYNC&quot;;</span>
+<span class="nc" id="L352">                SyncRequest syncRequest = new SyncRequest();</span>
+<span class="nc" id="L353">                ByteBufferInputStream.byteBuffer2Record(request.request, syncRequest);</span>
+<span class="nc" id="L354">                rsp = new SyncResponse(syncRequest.getPath());</span>
+<span class="nc" id="L355">                requestPathMetricsCollector.registerRequest(request.type, syncRequest.getPath());</span>
+<span class="nc" id="L356">                break;</span>
+            }
+            case OpCode.check: {
+<span class="nc" id="L359">                lastOp = &quot;CHEC&quot;;</span>
+<span class="nc" id="L360">                rsp = new SetDataResponse(rc.stat);</span>
+<span class="nc" id="L361">                err = Code.get(rc.err);</span>
+<span class="nc" id="L362">                break;</span>
+            }
+            case OpCode.exists: {
+<span class="nc" id="L365">                lastOp = &quot;EXIS&quot;;</span>
+                // TODO we need to figure out the security requirement for this!
+<span class="nc" id="L367">                ExistsRequest existsRequest = new ExistsRequest();</span>
+<span class="nc" id="L368">                ByteBufferInputStream.byteBuffer2Record(request.request, existsRequest);</span>
+<span class="nc" id="L369">                path = existsRequest.getPath();</span>
+<span class="nc bnc" id="L370" title="All 2 branches missed.">                if (path.indexOf('\0') != -1) {</span>
+<span class="nc" id="L371">                    throw new KeeperException.BadArgumentsException();</span>
+                }
+<span class="nc bnc" id="L373" title="All 2 branches missed.">                Stat stat = zks.getZKDatabase().statNode(path, existsRequest.getWatch() ? cnxn : null);</span>
+<span class="nc" id="L374">                rsp = new ExistsResponse(stat);</span>
+<span class="nc" id="L375">                requestPathMetricsCollector.registerRequest(request.type, path);</span>
+<span class="nc" id="L376">                break;</span>
+            }
+            case OpCode.getData: {
+<span class="nc" id="L379">                lastOp = &quot;GETD&quot;;</span>
+<span class="nc" id="L380">                GetDataRequest getDataRequest = new GetDataRequest();</span>
+<span class="nc" id="L381">                ByteBufferInputStream.byteBuffer2Record(request.request, getDataRequest);</span>
+<span class="nc" id="L382">                path = getDataRequest.getPath();</span>
+<span class="nc" id="L383">                rsp = handleGetDataRequest(getDataRequest, cnxn, request.authInfo);</span>
+<span class="nc" id="L384">                requestPathMetricsCollector.registerRequest(request.type, path);</span>
+<span class="nc" id="L385">                break;</span>
+            }
+            case OpCode.setWatches: {
+<span class="nc" id="L388">                lastOp = &quot;SETW&quot;;</span>
+<span class="nc" id="L389">                SetWatches setWatches = new SetWatches();</span>
+                // TODO we really should not need this
+<span class="nc" id="L391">                request.request.rewind();</span>
+<span class="nc" id="L392">                ByteBufferInputStream.byteBuffer2Record(request.request, setWatches);</span>
+<span class="nc" id="L393">                long relativeZxid = setWatches.getRelativeZxid();</span>
+<span class="nc" id="L394">                zks.getZKDatabase()</span>
+<span class="nc" id="L395">                   .setWatches(</span>
+                       relativeZxid,
+<span class="nc" id="L397">                       setWatches.getDataWatches(),</span>
+<span class="nc" id="L398">                       setWatches.getExistWatches(),</span>
+<span class="nc" id="L399">                       setWatches.getChildWatches(),</span>
+<span class="nc" id="L400">                       Collections.emptyList(),</span>
+<span class="nc" id="L401">                       Collections.emptyList(),</span>
+                       cnxn);
+<span class="nc" id="L403">                break;</span>
+            }
+            case OpCode.setWatches2: {
+<span class="nc" id="L406">                lastOp = &quot;STW2&quot;;</span>
+<span class="nc" id="L407">                SetWatches2 setWatches = new SetWatches2();</span>
+                // TODO we really should not need this
+<span class="nc" id="L409">                request.request.rewind();</span>
+<span class="nc" id="L410">                ByteBufferInputStream.byteBuffer2Record(request.request, setWatches);</span>
+<span class="nc" id="L411">                long relativeZxid = setWatches.getRelativeZxid();</span>
+<span class="nc" id="L412">                zks.getZKDatabase().setWatches(relativeZxid,</span>
+<span class="nc" id="L413">                        setWatches.getDataWatches(),</span>
+<span class="nc" id="L414">                        setWatches.getExistWatches(),</span>
+<span class="nc" id="L415">                        setWatches.getChildWatches(),</span>
+<span class="nc" id="L416">                        setWatches.getPersistentWatches(),</span>
+<span class="nc" id="L417">                        setWatches.getPersistentRecursiveWatches(),</span>
+                        cnxn);
+<span class="nc" id="L419">                break;</span>
+            }
+            case OpCode.addWatch: {
+<span class="nc" id="L422">                lastOp = &quot;ADDW&quot;;</span>
+<span class="nc" id="L423">                AddWatchRequest addWatcherRequest = new AddWatchRequest();</span>
+<span class="nc" id="L424">                ByteBufferInputStream.byteBuffer2Record(request.request,</span>
+                        addWatcherRequest);
+<span class="nc" id="L426">                zks.getZKDatabase().addWatch(addWatcherRequest.getPath(), cnxn, addWatcherRequest.getMode());</span>
+<span class="nc" id="L427">                rsp = new ErrorResponse(0);</span>
+<span class="nc" id="L428">                break;</span>
+            }
+            case OpCode.getACL: {
+<span class="nc" id="L431">                lastOp = &quot;GETA&quot;;</span>
+<span class="nc" id="L432">                GetACLRequest getACLRequest = new GetACLRequest();</span>
+<span class="nc" id="L433">                ByteBufferInputStream.byteBuffer2Record(request.request, getACLRequest);</span>
+<span class="nc" id="L434">                path = getACLRequest.getPath();</span>
+<span class="nc" id="L435">                DataNode n = zks.getZKDatabase().getNode(path);</span>
+<span class="nc bnc" id="L436" title="All 2 branches missed.">                if (n == null) {</span>
+<span class="nc" id="L437">                    throw new KeeperException.NoNodeException();</span>
+                }
+<span class="nc" id="L439">                zks.checkACL(</span>
+                    request.cnxn,
+<span class="nc" id="L441">                    zks.getZKDatabase().aclForNode(n),</span>
+                    ZooDefs.Perms.READ | ZooDefs.Perms.ADMIN, request.authInfo, path,
+                    null);
+
+<span class="nc" id="L445">                Stat stat = new Stat();</span>
+<span class="nc" id="L446">                List&lt;ACL&gt; acl = zks.getZKDatabase().getACL(path, stat);</span>
+<span class="nc" id="L447">                requestPathMetricsCollector.registerRequest(request.type, getACLRequest.getPath());</span>
+
+                try {
+<span class="nc" id="L450">                    zks.checkACL(</span>
+                        request.cnxn,
+<span class="nc" id="L452">                        zks.getZKDatabase().aclForNode(n),</span>
+                        ZooDefs.Perms.ADMIN,
+                        request.authInfo,
+                        path,
+                        null);
+<span class="nc" id="L457">                    rsp = new GetACLResponse(acl, stat);</span>
+<span class="nc" id="L458">                } catch (KeeperException.NoAuthException e) {</span>
+<span class="nc" id="L459">                    List&lt;ACL&gt; acl1 = new ArrayList&lt;ACL&gt;(acl.size());</span>
+<span class="nc bnc" id="L460" title="All 2 branches missed.">                    for (ACL a : acl) {</span>
+<span class="nc bnc" id="L461" title="All 2 branches missed.">                        if (&quot;digest&quot;.equals(a.getId().getScheme())) {</span>
+<span class="nc" id="L462">                            Id id = a.getId();</span>
+<span class="nc" id="L463">                            Id id1 = new Id(id.getScheme(), id.getId().replaceAll(&quot;:.*&quot;, &quot;:x&quot;));</span>
+<span class="nc" id="L464">                            acl1.add(new ACL(a.getPerms(), id1));</span>
+<span class="nc" id="L465">                        } else {</span>
+<span class="nc" id="L466">                            acl1.add(a);</span>
+                        }
+<span class="nc" id="L468">                    }</span>
+<span class="nc" id="L469">                    rsp = new GetACLResponse(acl1, stat);</span>
+<span class="nc" id="L470">                }</span>
+<span class="nc" id="L471">                break;</span>
+            }
+            case OpCode.getChildren: {
+<span class="nc" id="L474">                lastOp = &quot;GETC&quot;;</span>
+<span class="nc" id="L475">                GetChildrenRequest getChildrenRequest = new GetChildrenRequest();</span>
+<span class="nc" id="L476">                ByteBufferInputStream.byteBuffer2Record(request.request, getChildrenRequest);</span>
+<span class="nc" id="L477">                path = getChildrenRequest.getPath();</span>
+<span class="nc" id="L478">                rsp = handleGetChildrenRequest(getChildrenRequest, cnxn, request.authInfo);</span>
+<span class="nc" id="L479">                requestPathMetricsCollector.registerRequest(request.type, path);</span>
+<span class="nc" id="L480">                break;</span>
+            }
+            case OpCode.getAllChildrenNumber: {
+<span class="nc" id="L483">                lastOp = &quot;GETACN&quot;;</span>
+<span class="nc" id="L484">                GetAllChildrenNumberRequest getAllChildrenNumberRequest = new GetAllChildrenNumberRequest();</span>
+<span class="nc" id="L485">                ByteBufferInputStream.byteBuffer2Record(request.request, getAllChildrenNumberRequest);</span>
+<span class="nc" id="L486">                path = getAllChildrenNumberRequest.getPath();</span>
+<span class="nc" id="L487">                DataNode n = zks.getZKDatabase().getNode(path);</span>
+<span class="nc bnc" id="L488" title="All 2 branches missed.">                if (n == null) {</span>
+<span class="nc" id="L489">                    throw new KeeperException.NoNodeException();</span>
+                }
+<span class="nc" id="L491">                zks.checkACL(</span>
+                    request.cnxn,
+<span class="nc" id="L493">                    zks.getZKDatabase().aclForNode(n),</span>
+                    ZooDefs.Perms.READ,
+                    request.authInfo,
+                    path,
+                    null);
+<span class="nc" id="L498">                int number = zks.getZKDatabase().getAllChildrenNumber(path);</span>
+<span class="nc" id="L499">                rsp = new GetAllChildrenNumberResponse(number);</span>
+<span class="nc" id="L500">                break;</span>
+            }
+            case OpCode.getChildren2: {
+<span class="nc" id="L503">                lastOp = &quot;GETC&quot;;</span>
+<span class="nc" id="L504">                GetChildren2Request getChildren2Request = new GetChildren2Request();</span>
+<span class="nc" id="L505">                ByteBufferInputStream.byteBuffer2Record(request.request, getChildren2Request);</span>
+<span class="nc" id="L506">                Stat stat = new Stat();</span>
+<span class="nc" id="L507">                path = getChildren2Request.getPath();</span>
+<span class="nc" id="L508">                DataNode n = zks.getZKDatabase().getNode(path);</span>
+<span class="nc bnc" id="L509" title="All 2 branches missed.">                if (n == null) {</span>
+<span class="nc" id="L510">                    throw new KeeperException.NoNodeException();</span>
+                }
+<span class="nc" id="L512">                zks.checkACL(</span>
+                    request.cnxn,
+<span class="nc" id="L514">                    zks.getZKDatabase().aclForNode(n),</span>
+                    ZooDefs.Perms.READ,
+                    request.authInfo, path,
+                    null);
+<span class="nc" id="L518">                List&lt;String&gt; children = zks.getZKDatabase()</span>
+<span class="nc bnc" id="L519" title="All 2 branches missed.">                                           .getChildren(path, stat, getChildren2Request.getWatch() ? cnxn : null);</span>
+<span class="nc" id="L520">                rsp = new GetChildren2Response(children, stat);</span>
+<span class="nc" id="L521">                requestPathMetricsCollector.registerRequest(request.type, path);</span>
+<span class="nc" id="L522">                break;</span>
+            }
+            case OpCode.checkWatches: {
+<span class="nc" id="L525">                lastOp = &quot;CHKW&quot;;</span>
+<span class="nc" id="L526">                CheckWatchesRequest checkWatches = new CheckWatchesRequest();</span>
+<span class="nc" id="L527">                ByteBufferInputStream.byteBuffer2Record(request.request, checkWatches);</span>
+<span class="nc" id="L528">                WatcherType type = WatcherType.fromInt(checkWatches.getType());</span>
+<span class="nc" id="L529">                path = checkWatches.getPath();</span>
+<span class="nc" id="L530">                boolean containsWatcher = zks.getZKDatabase().containsWatcher(path, type, cnxn);</span>
+<span class="nc bnc" id="L531" title="All 2 branches missed.">                if (!containsWatcher) {</span>
+<span class="nc" id="L532">                    String msg = String.format(Locale.ENGLISH, &quot;%s (type: %s)&quot;, path, type);</span>
+<span class="nc" id="L533">                    throw new KeeperException.NoWatcherException(msg);</span>
+                }
+<span class="nc" id="L535">                requestPathMetricsCollector.registerRequest(request.type, checkWatches.getPath());</span>
+<span class="nc" id="L536">                break;</span>
+            }
+            case OpCode.removeWatches: {
+<span class="nc" id="L539">                lastOp = &quot;REMW&quot;;</span>
+<span class="nc" id="L540">                RemoveWatchesRequest removeWatches = new RemoveWatchesRequest();</span>
+<span class="nc" id="L541">                ByteBufferInputStream.byteBuffer2Record(request.request, removeWatches);</span>
+<span class="nc" id="L542">                WatcherType type = WatcherType.fromInt(removeWatches.getType());</span>
+<span class="nc" id="L543">                path = removeWatches.getPath();</span>
+<span class="nc" id="L544">                boolean removed = zks.getZKDatabase().removeWatch(path, type, cnxn);</span>
+<span class="nc bnc" id="L545" title="All 2 branches missed.">                if (!removed) {</span>
+<span class="nc" id="L546">                    String msg = String.format(Locale.ENGLISH, &quot;%s (type: %s)&quot;, path, type);</span>
+<span class="nc" id="L547">                    throw new KeeperException.NoWatcherException(msg);</span>
+                }
+<span class="nc" id="L549">                requestPathMetricsCollector.registerRequest(request.type, removeWatches.getPath());</span>
+<span class="nc" id="L550">                break;</span>
+            }
+            case OpCode.whoAmI: {
+<span class="nc" id="L553">                lastOp = &quot;HOMI&quot;;</span>
+<span class="nc" id="L554">                rsp = new WhoAmIResponse(AuthUtil.getClientInfos(request.authInfo));</span>
+<span class="nc" id="L555">                break;</span>
+             }
+            case OpCode.getEphemerals: {
+<span class="nc" id="L558">                lastOp = &quot;GETE&quot;;</span>
+<span class="nc" id="L559">                GetEphemeralsRequest getEphemerals = new GetEphemeralsRequest();</span>
+<span class="nc" id="L560">                ByteBufferInputStream.byteBuffer2Record(request.request, getEphemerals);</span>
+<span class="nc" id="L561">                String prefixPath = getEphemerals.getPrefixPath();</span>
+<span class="nc" id="L562">                Set&lt;String&gt; allEphems = zks.getZKDatabase().getDataTree().getEphemerals(request.sessionId);</span>
+<span class="nc" id="L563">                List&lt;String&gt; ephemerals = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L564" title="All 6 branches missed.">                if (prefixPath == null || prefixPath.trim().isEmpty() || &quot;/&quot;.equals(prefixPath.trim())) {</span>
+<span class="nc" id="L565">                    ephemerals.addAll(allEphems);</span>
+                } else {
+<span class="nc bnc" id="L567" title="All 2 branches missed.">                    for (String p : allEphems) {</span>
+<span class="nc bnc" id="L568" title="All 2 branches missed.">                        if (p.startsWith(prefixPath)) {</span>
+<span class="nc" id="L569">                            ephemerals.add(p);</span>
+                        }
+<span class="nc" id="L571">                    }</span>
+                }
+<span class="nc" id="L573">                rsp = new GetEphemeralsResponse(ephemerals);</span>
+<span class="nc" id="L574">                break;</span>
+            }
+            }
+<span class="nc" id="L577">        } catch (SessionMovedException e) {</span>
+            // session moved is a connection level error, we need to tear
+            // down the connection otw ZOOKEEPER-710 might happen
+            // ie client on slow follower starts to renew session, fails
+            // before this completes, then tries the fast follower (leader)
+            // and is successful, however the initial renew is then
+            // successfully fwd/processed by the leader and as a result
+            // the client and leader disagree on where the client is most
+            // recently attached (and therefore invalid SESSION MOVED generated)
+<span class="nc" id="L586">            cnxn.sendCloseSession();</span>
+<span class="nc" id="L587">            return;</span>
+<span class="nc" id="L588">        } catch (KeeperException e) {</span>
+<span class="nc" id="L589">            err = e.code();</span>
+<span class="nc" id="L590">        } catch (Exception e) {</span>
+            // log at error level as we are returning a marshalling
+            // error to the user
+<span class="nc" id="L593">            LOG.error(&quot;Failed to process {}&quot;, request, e);</span>
+<span class="nc" id="L594">            StringBuilder sb = new StringBuilder();</span>
+<span class="nc" id="L595">            ByteBuffer bb = request.request;</span>
+<span class="nc" id="L596">            bb.rewind();</span>
+<span class="nc bnc" id="L597" title="All 2 branches missed.">            while (bb.hasRemaining()) {</span>
+<span class="nc" id="L598">                sb.append(Integer.toHexString(bb.get() &amp; 0xff));</span>
+            }
+<span class="nc" id="L600">            LOG.error(&quot;Dumping request buffer: 0x{}&quot;, sb.toString());</span>
+<span class="nc" id="L601">            err = Code.MARSHALLINGERROR;</span>
+<span class="nc" id="L602">        }</span>
+
+<span class="nc" id="L604">        ReplyHeader hdr = new ReplyHeader(request.cxid, lastZxid, err.intValue());</span>
+
+<span class="nc" id="L606">        updateStats(request, lastOp, lastZxid);</span>
+
+        try {
+<span class="nc bnc" id="L609" title="All 4 branches missed.">            if (path == null || rsp == null) {</span>
+<span class="nc" id="L610">                responseSize = cnxn.sendResponse(hdr, rsp, &quot;response&quot;);</span>
+            } else {
+<span class="nc" id="L612">                int opCode = request.type;</span>
+<span class="nc" id="L613">                Stat stat = null;</span>
+                // Serialized read and get children responses could be cached by the connection
+                // object. Cache entries are identified by their path and last modified zxid,
+                // so these values are passed along with the response.
+<span class="nc bnc" id="L617" title="All 3 branches missed.">                switch (opCode) {</span>
+                    case OpCode.getData : {
+<span class="nc" id="L619">                        GetDataResponse getDataResponse = (GetDataResponse) rsp;</span>
+<span class="nc" id="L620">                        stat = getDataResponse.getStat();</span>
+<span class="nc" id="L621">                        responseSize = cnxn.sendResponse(hdr, rsp, &quot;response&quot;, path, stat, opCode);</span>
+<span class="nc" id="L622">                        break;</span>
+                    }
+                    case OpCode.getChildren2 : {
+<span class="nc" id="L625">                        GetChildren2Response getChildren2Response = (GetChildren2Response) rsp;</span>
+<span class="nc" id="L626">                        stat = getChildren2Response.getStat();</span>
+<span class="nc" id="L627">                        responseSize = cnxn.sendResponse(hdr, rsp, &quot;response&quot;, path, stat, opCode);</span>
+<span class="nc" id="L628">                        break;</span>
+                    }
+                    default:
+<span class="nc" id="L631">                        responseSize = cnxn.sendResponse(hdr, rsp, &quot;response&quot;);</span>
+                }
+            }
+
+<span class="nc bnc" id="L635" title="All 2 branches missed.">            if (request.type == OpCode.closeSession) {</span>
+<span class="nc" id="L636">                cnxn.sendCloseSession();</span>
+            }
+<span class="nc" id="L638">        } catch (IOException e) {</span>
+<span class="nc" id="L639">            LOG.error(&quot;FIXMSG&quot;, e);</span>
+        } finally {
+<span class="nc" id="L641">            ServerMetrics.getMetrics().RESPONSE_BYTES.add(responseSize);</span>
+        }
+<span class="nc" id="L643">    }</span>
+
+    private Record handleGetChildrenRequest(Record request, ServerCnxn cnxn, List&lt;Id&gt; authInfo) throws KeeperException, IOException {
+<span class="nc" id="L646">        GetChildrenRequest getChildrenRequest = (GetChildrenRequest) request;</span>
+<span class="nc" id="L647">        String path = getChildrenRequest.getPath();</span>
+<span class="nc" id="L648">        DataNode n = zks.getZKDatabase().getNode(path);</span>
+<span class="nc bnc" id="L649" title="All 2 branches missed.">        if (n == null) {</span>
+<span class="nc" id="L650">            throw new KeeperException.NoNodeException();</span>
+        }
+<span class="nc" id="L652">        zks.checkACL(cnxn, zks.getZKDatabase().aclForNode(n), ZooDefs.Perms.READ, authInfo, path, null);</span>
+<span class="nc" id="L653">        List&lt;String&gt; children = zks.getZKDatabase()</span>
+<span class="nc bnc" id="L654" title="All 2 branches missed.">                                   .getChildren(path, null, getChildrenRequest.getWatch() ? cnxn : null);</span>
+<span class="nc" id="L655">        return new GetChildrenResponse(children);</span>
+    }
+
+    private Record handleGetDataRequest(Record request, ServerCnxn cnxn, List&lt;Id&gt; authInfo) throws KeeperException, IOException {
+<span class="nc" id="L659">        GetDataRequest getDataRequest = (GetDataRequest) request;</span>
+<span class="nc" id="L660">        String path = getDataRequest.getPath();</span>
+<span class="nc" id="L661">        DataNode n = zks.getZKDatabase().getNode(path);</span>
+<span class="nc bnc" id="L662" title="All 2 branches missed.">        if (n == null) {</span>
+<span class="nc" id="L663">            throw new KeeperException.NoNodeException();</span>
+        }
+<span class="nc" id="L665">        zks.checkACL(cnxn, zks.getZKDatabase().aclForNode(n), ZooDefs.Perms.READ, authInfo, path, null);</span>
+<span class="nc" id="L666">        Stat stat = new Stat();</span>
+<span class="nc bnc" id="L667" title="All 2 branches missed.">        byte[] b = zks.getZKDatabase().getData(path, stat, getDataRequest.getWatch() ? cnxn : null);</span>
+<span class="nc" id="L668">        return new GetDataResponse(b, stat);</span>
+    }
+
+    private boolean closeSession(ServerCnxnFactory serverCnxnFactory, long sessionId) {
+<span class="nc bnc" id="L672" title="All 2 branches missed.">        if (serverCnxnFactory == null) {</span>
+<span class="nc" id="L673">            return false;</span>
+        }
+<span class="nc" id="L675">        return serverCnxnFactory.closeSession(sessionId, ServerCnxn.DisconnectReason.CLIENT_CLOSED_SESSION);</span>
+    }
+
+    private boolean connClosedByClient(Request request) {
+<span class="nc bnc" id="L679" title="All 2 branches missed.">        return request.cnxn == null;</span>
+    }
+
+    public void shutdown() {
+        // we are the final link in the chain
+<span class="nc" id="L684">        LOG.info(&quot;shutdown of request processor complete&quot;);</span>
+<span class="nc" id="L685">    }</span>
+
+    private void updateStats(Request request, String lastOp, long lastZxid) {
+<span class="nc bnc" id="L688" title="All 2 branches missed.">        if (request.cnxn == null) {</span>
+<span class="nc" id="L689">            return;</span>
+        }
+<span class="nc" id="L691">        long currentTime = Time.currentElapsedTime();</span>
+<span class="nc" id="L692">        zks.serverStats().updateLatency(request, currentTime);</span>
+<span class="nc" id="L693">        request.cnxn.updateStatsForResponse(request.cxid, lastZxid, lastOp, request.createTime, currentTime);</span>
+<span class="nc" id="L694">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

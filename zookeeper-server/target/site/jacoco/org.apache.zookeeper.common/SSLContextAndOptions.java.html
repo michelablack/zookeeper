@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SSLContextAndOptions.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.common</a> &gt; <span class="el_source">SSLContextAndOptions.java</span></div><h1>SSLContextAndOptions.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.common;
+
+import static java.util.Objects.requireNonNull;
+import io.netty.handler.ssl.IdentityCipherSuiteFilter;
+import io.netty.handler.ssl.JdkSslContext;
+import io.netty.handler.ssl.SslContext;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.net.Socket;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.SSLSocket;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Wrapper class for an SSLContext + some config options that can't be set on the context when it is created but
+ * must be set on a secure socket created by the context after the socket creation. By wrapping the options in this
+ * class we avoid reading from global system properties during socket configuration. This makes testing easier
+ * since we can create different X509Util instances with different configurations in a single test process, and
+ * unit test interactions between them.
+ */
+public class SSLContextAndOptions {
+
+<span class="nc" id="L47">    private static final Logger LOG = LoggerFactory.getLogger(SSLContextAndOptions.class);</span>
+
+    private final X509Util x509Util;
+    private final String[] enabledProtocols;
+    private final String[] cipherSuites;
+    private final List&lt;String&gt; cipherSuitesAsList;
+    private final X509Util.ClientAuth clientAuth;
+    private final SSLContext sslContext;
+    private final int handshakeDetectionTimeoutMillis;
+
+    /**
+     * Note: constructor is intentionally package-private, only the X509Util class should be creating instances of this
+     * class.
+     * @param x509Util the X509Util that created this object.
+     * @param config a ZKConfig that holds config properties.
+     * @param sslContext the SSLContext.
+     */
+<span class="nc" id="L64">    SSLContextAndOptions(final X509Util x509Util, final ZKConfig config, final SSLContext sslContext) {</span>
+<span class="nc" id="L65">        this.x509Util = requireNonNull(x509Util);</span>
+<span class="nc" id="L66">        this.sslContext = requireNonNull(sslContext);</span>
+<span class="nc" id="L67">        this.enabledProtocols = getEnabledProtocols(requireNonNull(config), sslContext);</span>
+<span class="nc" id="L68">        String[] ciphers = getCipherSuites(config);</span>
+<span class="nc" id="L69">        this.cipherSuites = ciphers;</span>
+<span class="nc" id="L70">        this.cipherSuitesAsList = Collections.unmodifiableList(Arrays.asList(ciphers));</span>
+<span class="nc" id="L71">        this.clientAuth = getClientAuth(config);</span>
+<span class="nc" id="L72">        this.handshakeDetectionTimeoutMillis = getHandshakeDetectionTimeoutMillis(config);</span>
+<span class="nc" id="L73">    }</span>
+
+    public SSLContext getSSLContext() {
+<span class="nc" id="L76">        return sslContext;</span>
+    }
+
+    public SSLSocket createSSLSocket() throws IOException {
+<span class="nc" id="L80">        return configureSSLSocket((SSLSocket) sslContext.getSocketFactory().createSocket(), true);</span>
+    }
+
+    public SSLSocket createSSLSocket(Socket socket, byte[] pushbackBytes) throws IOException {
+        SSLSocket sslSocket;
+<span class="nc bnc" id="L85" title="All 4 branches missed.">        if (pushbackBytes != null &amp;&amp; pushbackBytes.length &gt; 0) {</span>
+<span class="nc" id="L86">            sslSocket = (SSLSocket) sslContext.getSocketFactory()</span>
+<span class="nc" id="L87">                                              .createSocket(socket, new ByteArrayInputStream(pushbackBytes), true);</span>
+        } else {
+<span class="nc" id="L89">            sslSocket = (SSLSocket) sslContext.getSocketFactory().createSocket(socket, null, socket.getPort(), true);</span>
+        }
+<span class="nc" id="L91">        return configureSSLSocket(sslSocket, false);</span>
+    }
+
+    public SSLServerSocket createSSLServerSocket() throws IOException {
+<span class="nc" id="L95">        SSLServerSocket sslServerSocket = (SSLServerSocket) sslContext.getServerSocketFactory().createServerSocket();</span>
+<span class="nc" id="L96">        return configureSSLServerSocket(sslServerSocket);</span>
+    }
+
+    public SSLServerSocket createSSLServerSocket(int port) throws IOException {
+<span class="nc" id="L100">        SSLServerSocket sslServerSocket = (SSLServerSocket) sslContext.getServerSocketFactory().createServerSocket(port);</span>
+<span class="nc" id="L101">        return configureSSLServerSocket(sslServerSocket);</span>
+    }
+
+    public SslContext createNettyJdkSslContext(SSLContext sslContext, boolean isClientSocket) {
+<span class="nc" id="L105">        return new JdkSslContext(</span>
+                sslContext,
+                isClientSocket,
+                cipherSuitesAsList,
+                IdentityCipherSuiteFilter.INSTANCE,
+                null,
+<span class="nc bnc" id="L111" title="All 2 branches missed.">                isClientSocket</span>
+<span class="nc" id="L112">                        ? X509Util.ClientAuth.NONE.toNettyClientAuth()</span>
+<span class="nc" id="L113">                        : clientAuth.toNettyClientAuth(),</span>
+                enabledProtocols,
+                false);
+    }
+
+    public int getHandshakeDetectionTimeoutMillis() {
+<span class="nc" id="L119">        return handshakeDetectionTimeoutMillis;</span>
+    }
+
+    private SSLSocket configureSSLSocket(SSLSocket socket, boolean isClientSocket) {
+<span class="nc" id="L123">        SSLParameters sslParameters = socket.getSSLParameters();</span>
+<span class="nc" id="L124">        configureSslParameters(sslParameters, isClientSocket);</span>
+<span class="nc" id="L125">        socket.setSSLParameters(sslParameters);</span>
+<span class="nc" id="L126">        socket.setUseClientMode(isClientSocket);</span>
+<span class="nc" id="L127">        return socket;</span>
+    }
+
+    private SSLServerSocket configureSSLServerSocket(SSLServerSocket socket) {
+<span class="nc" id="L131">        SSLParameters sslParameters = socket.getSSLParameters();</span>
+<span class="nc" id="L132">        configureSslParameters(sslParameters, false);</span>
+<span class="nc" id="L133">        socket.setSSLParameters(sslParameters);</span>
+<span class="nc" id="L134">        socket.setUseClientMode(false);</span>
+<span class="nc" id="L135">        return socket;</span>
+    }
+
+    private void configureSslParameters(SSLParameters sslParameters, boolean isClientSocket) {
+<span class="nc bnc" id="L139" title="All 2 branches missed.">        if (cipherSuites != null) {</span>
+<span class="nc" id="L140">            LOG.debug(</span>
+                &quot;Setup cipher suites for {} socket: {}&quot;,
+<span class="nc bnc" id="L142" title="All 2 branches missed.">                isClientSocket ? &quot;client&quot; : &quot;server&quot;,</span>
+<span class="nc" id="L143">                Arrays.toString(cipherSuites));</span>
+<span class="nc" id="L144">            sslParameters.setCipherSuites(cipherSuites);</span>
+        }
+
+<span class="nc bnc" id="L147" title="All 2 branches missed.">        if (enabledProtocols != null) {</span>
+<span class="nc" id="L148">            LOG.debug(</span>
+                &quot;Setup enabled protocols for {} socket: {}&quot;,
+<span class="nc bnc" id="L150" title="All 2 branches missed.">                isClientSocket ? &quot;client&quot; : &quot;server&quot;,</span>
+<span class="nc" id="L151">                Arrays.toString(enabledProtocols));</span>
+<span class="nc" id="L152">            sslParameters.setProtocols(enabledProtocols);</span>
+        }
+
+<span class="nc bnc" id="L155" title="All 2 branches missed.">        if (!isClientSocket) {</span>
+<span class="nc bnc" id="L156" title="All 3 branches missed.">            switch (clientAuth) {</span>
+            case NEED:
+<span class="nc" id="L158">                sslParameters.setNeedClientAuth(true);</span>
+<span class="nc" id="L159">                break;</span>
+            case WANT:
+<span class="nc" id="L161">                sslParameters.setWantClientAuth(true);</span>
+<span class="nc" id="L162">                break;</span>
+            default:
+<span class="nc" id="L164">                sslParameters.setNeedClientAuth(false); // also clears the wantClientAuth flag according to docs</span>
+                break;
+            }
+        }
+<span class="nc" id="L168">    }</span>
+
+    private String[] getEnabledProtocols(final ZKConfig config, final SSLContext sslContext) {
+<span class="nc" id="L171">        String enabledProtocolsInput = config.getProperty(x509Util.getSslEnabledProtocolsProperty());</span>
+<span class="nc bnc" id="L172" title="All 2 branches missed.">        if (enabledProtocolsInput == null) {</span>
+<span class="nc" id="L173">            return new String[]{sslContext.getProtocol()};</span>
+        }
+<span class="nc" id="L175">        return enabledProtocolsInput.split(&quot;,&quot;);</span>
+    }
+
+    private String[] getCipherSuites(final ZKConfig config) {
+<span class="nc" id="L179">        String cipherSuitesInput = config.getProperty(x509Util.getSslCipherSuitesProperty());</span>
+<span class="nc bnc" id="L180" title="All 2 branches missed.">        if (cipherSuitesInput == null) {</span>
+<span class="nc" id="L181">            return X509Util.getDefaultCipherSuites();</span>
+        } else {
+<span class="nc" id="L183">            return cipherSuitesInput.split(&quot;,&quot;);</span>
+        }
+    }
+
+    private X509Util.ClientAuth getClientAuth(final ZKConfig config) {
+<span class="nc" id="L188">        return X509Util.ClientAuth.fromPropertyValue(config.getProperty(x509Util.getSslClientAuthProperty()));</span>
+    }
+
+    private int getHandshakeDetectionTimeoutMillis(final ZKConfig config) {
+<span class="nc" id="L192">        String propertyString = config.getProperty(x509Util.getSslHandshakeDetectionTimeoutMillisProperty());</span>
+        int result;
+<span class="nc bnc" id="L194" title="All 2 branches missed.">        if (propertyString == null) {</span>
+<span class="nc" id="L195">            result = X509Util.DEFAULT_HANDSHAKE_DETECTION_TIMEOUT_MILLIS;</span>
+        } else {
+<span class="nc" id="L197">            result = Integer.parseInt(propertyString);</span>
+<span class="nc bnc" id="L198" title="All 2 branches missed.">            if (result &lt; 1) {</span>
+                // Timeout of 0 is not allowed, since an infinite timeout can permanently lock up an
+                // accept() thread.
+<span class="nc" id="L201">                LOG.warn(</span>
+                    &quot;Invalid value for {}: {}, using the default value of {}&quot;,
+<span class="nc" id="L203">                    x509Util.getSslHandshakeDetectionTimeoutMillisProperty(),</span>
+<span class="nc" id="L204">                    result,</span>
+<span class="nc" id="L205">                    X509Util.DEFAULT_HANDSHAKE_DETECTION_TIMEOUT_MILLIS);</span>
+<span class="nc" id="L206">                result = X509Util.DEFAULT_HANDSHAKE_DETECTION_TIMEOUT_MILLIS;</span>
+            }
+        }
+<span class="nc" id="L209">        return result;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

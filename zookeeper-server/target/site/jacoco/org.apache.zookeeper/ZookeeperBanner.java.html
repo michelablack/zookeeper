@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ZookeeperBanner.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper</a> &gt; <span class="el_source">ZookeeperBanner.java</span></div><h1>ZookeeperBanner.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper;
+
+import org.slf4j.Logger;
+
+/**
+ * ZookeeperBanner which writes the 'Zookeeper' banner at the start of zk server.
+ *
+ */
+<span class="nc" id="L27">public class ZookeeperBanner {</span>
+
+<span class="fc" id="L29">    private static final String[] BANNER = {</span>
+        &quot;&quot;,
+        &quot;  ______                  _                                          &quot;,
+        &quot; |___  /                 | |                                         &quot;,
+        &quot;    / /    ___     ___   | | __   ___    ___   _ __     ___   _ __   &quot;,
+        &quot;   / /    / _ \\   / _ \\  | |/ /  / _ \\  / _ \\ | '_ \\   / _ \\ | '__|&quot;,
+        &quot;  / /__  | (_) | | (_) | |   &lt;  |  __/ |  __/ | |_) | |  __/ | |    &quot;,
+        &quot; /_____|  \\___/   \\___/  |_|\\_\\  \\___|  \\___| | .__/   \\___| |_|&quot;,
+        &quot;                                              | |                     &quot;,
+        &quot;                                              |_|                     &quot;, &quot;&quot;};
+
+    public static void printBanner(Logger log) {
+<span class="fc bfc" id="L41" title="All 2 branches covered.">        for (String line : BANNER) {</span>
+<span class="fc" id="L42">            log.info(line);</span>
+        }
+<span class="fc" id="L44">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

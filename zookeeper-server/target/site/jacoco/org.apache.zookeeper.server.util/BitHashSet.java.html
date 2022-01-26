@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>BitHashSet.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.util</a> &gt; <span class="el_source">BitHashSet.java</span></div><h1>BitHashSet.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.util;
+
+import java.util.BitSet;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Set;
+
+/**
+ * Using BitSet to store all the elements, and use HashSet to cache limited
+ * number of elements to find a balance between memory and time complexity.
+ *
+ * Without HashSet, we need to use O(N) time to get the elements, N is
+ * the bit numbers in elementBits. But we need to keep the size small to make
+ * sure it doesn't cost too much in memory, there is a trade off between
+ * memory and time complexity.
+ *
+ * Previously, was deciding to dynamically switch between SparseBitSet and
+ * HashSet based on the memory consumption, but it will take time to copy
+ * data over and may have some herd effect of keep copying data from one
+ * data structure to anther. The current solution can do a very good job
+ * given most of the paths have limited number of elements.
+ */
+public class BitHashSet implements Iterable&lt;Integer&gt; {
+
+    /**
+     * Change to SparseBitSet if we we want to optimize more, the number of
+     * elements on a single server is usually limited, so BitSet should be
+     * fine.
+     */
+<span class="nc" id="L48">    private final BitSet elementBits = new BitSet();</span>
+
+    /**
+     * HashSet is used to optimize the iterating, if there is a single
+     * element in this BitHashSet, but the bit is very large, without
+     * HashSet we need to go through all the words before return that
+     * element, which is not efficient.
+     */
+<span class="nc" id="L56">    private final Set&lt;Integer&gt; cache = new HashSet&lt;Integer&gt;();</span>
+
+    private final int cacheSize;
+
+    // To record how many elements in this set.
+<span class="nc" id="L61">    private int elementCount = 0;</span>
+
+    public BitHashSet() {
+<span class="nc" id="L64">        this(Integer.getInteger(&quot;zookeeper.bitHashCacheSize&quot;, 10));</span>
+<span class="nc" id="L65">    }</span>
+
+<span class="nc" id="L67">    public BitHashSet(int cacheSize) {</span>
+<span class="nc" id="L68">        this.cacheSize = cacheSize;</span>
+<span class="nc" id="L69">    }</span>
+
+    public synchronized boolean add(Integer elementBit) {
+<span class="nc bnc" id="L72" title="All 4 branches missed.">        if (elementBit == null || elementBits.get(elementBit)) {</span>
+<span class="nc" id="L73">            return false;</span>
+        }
+<span class="nc bnc" id="L75" title="All 2 branches missed.">        if (cache.size() &lt; cacheSize) {</span>
+<span class="nc" id="L76">            cache.add(elementBit);</span>
+        }
+<span class="nc" id="L78">        elementBits.set(elementBit);</span>
+<span class="nc" id="L79">        elementCount++;</span>
+<span class="nc" id="L80">        return true;</span>
+    }
+
+    /**
+     * Remove the watches, and return the number of watches being removed.
+     */
+    public synchronized int remove(Set&lt;Integer&gt; bitSet, BitSet bits) {
+<span class="nc" id="L87">        cache.removeAll(bitSet);</span>
+<span class="nc" id="L88">        elementBits.andNot(bits);</span>
+<span class="nc" id="L89">        int elementCountBefore = elementCount;</span>
+<span class="nc" id="L90">        elementCount = elementBits.cardinality();</span>
+<span class="nc" id="L91">        return elementCountBefore - elementCount;</span>
+    }
+
+    public synchronized boolean remove(Integer elementBit) {
+<span class="nc bnc" id="L95" title="All 4 branches missed.">        if (elementBit == null || !elementBits.get(elementBit)) {</span>
+<span class="nc" id="L96">            return false;</span>
+        }
+
+<span class="nc" id="L99">        cache.remove(elementBit);</span>
+<span class="nc" id="L100">        elementBits.clear(elementBit);</span>
+<span class="nc" id="L101">        elementCount--;</span>
+<span class="nc" id="L102">        return true;</span>
+    }
+
+    public synchronized boolean contains(Integer elementBit) {
+<span class="nc bnc" id="L106" title="All 2 branches missed.">        if (elementBit == null) {</span>
+<span class="nc" id="L107">            return false;</span>
+        }
+<span class="nc" id="L109">        return elementBits.get(elementBit);</span>
+    }
+
+    public synchronized int size() {
+<span class="nc" id="L113">        return elementCount;</span>
+    }
+
+    /**
+     * This function is not thread-safe, need to synchronized when
+     * iterate through this set.
+     */
+    @Override
+    public Iterator&lt;Integer&gt; iterator() {
+        // sample current size at the beginning
+<span class="nc" id="L123">        int currentSize = size();</span>
+
+<span class="nc bnc" id="L125" title="All 2 branches missed.">        if (cache.size() == currentSize) {</span>
+<span class="nc" id="L126">            return cache.iterator();</span>
+        }
+
+<span class="nc" id="L129">        return new Iterator&lt;Integer&gt;() {</span>
+<span class="nc" id="L130">            int returnedCount = 0;</span>
+<span class="nc" id="L131">            int bitIndex = 0;</span>
+
+            @Override
+            public boolean hasNext() {
+<span class="nc bnc" id="L135" title="All 2 branches missed.">                return returnedCount &lt; currentSize;</span>
+            }
+
+            @Override
+            public Integer next() {
+<span class="nc" id="L140">                int bit = elementBits.nextSetBit(bitIndex);</span>
+<span class="nc" id="L141">                bitIndex = bit + 1;</span>
+<span class="nc" id="L142">                returnedCount++;</span>
+<span class="nc" id="L143">                return bit;</span>
+            }
+
+            @Override
+            public void remove() {
+<span class="nc" id="L148">                throw new UnsupportedOperationException();</span>
+            }
+        };
+    }
+
+    // visible for test
+    public synchronized int cachedSize() {
+<span class="nc" id="L155">        return cache.size();</span>
+    }
+
+    public synchronized boolean isEmpty() {
+<span class="nc bnc" id="L159" title="All 2 branches missed.">        return elementCount == 0;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

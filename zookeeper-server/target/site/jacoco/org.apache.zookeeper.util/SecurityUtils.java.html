@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SecurityUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.util</a> &gt; <span class="el_source">SecurityUtils.java</span></div><h1>SecurityUtils.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.util;
+
+import java.security.Principal;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
+import javax.security.auth.Subject;
+import javax.security.auth.callback.CallbackHandler;
+import javax.security.sasl.Sasl;
+import javax.security.sasl.SaslClient;
+import javax.security.sasl.SaslException;
+import javax.security.sasl.SaslServer;
+import org.apache.zookeeper.SaslClientCallbackHandler;
+import org.apache.zookeeper.server.auth.KerberosName;
+import org.ietf.jgss.GSSContext;
+import org.ietf.jgss.GSSCredential;
+import org.ietf.jgss.GSSException;
+import org.ietf.jgss.GSSManager;
+import org.ietf.jgss.GSSName;
+import org.ietf.jgss.Oid;
+import org.slf4j.Logger;
+
+<span class="nc" id="L40">public final class SecurityUtils {</span>
+
+    public static final String QUORUM_HOSTNAME_PATTERN = &quot;_HOST&quot;;
+
+    /**
+     * Create an instance of a SaslClient. It will return null if there is an exception.
+     *
+     * @param subject subject
+     * @param servicePrincipal principal
+     * @param protocol name of the protocol for which the authentication is being performed
+     * @param serverName name of the server to authenticate to
+     * @param LOG logger
+     * @param entity can be either zookeeper client or quorum learner
+     *
+     * @return saslclient object
+     * @throws SaslException
+     */
+    public static SaslClient createSaslClient(
+        final Subject subject,
+        final String servicePrincipal,
+        final String protocol,
+        final String serverName,
+        final Logger LOG,
+        final String entity) throws SaslException {
+        SaslClient saslClient;
+        // Use subject.getPrincipals().isEmpty() as an indication of which SASL
+        // mechanism to use: if empty, use DIGEST-MD5; otherwise, use GSSAPI.
+<span class="nc bnc" id="L67" title="All 2 branches missed.">        if (subject.getPrincipals().isEmpty()) {</span>
+            // no principals: must not be GSSAPI: use DIGEST-MD5 mechanism
+            // instead.
+<span class="nc" id="L70">            LOG.info(&quot;{} will use DIGEST-MD5 as SASL mechanism.&quot;, entity);</span>
+<span class="nc" id="L71">            String[] mechs = {&quot;DIGEST-MD5&quot;};</span>
+<span class="nc" id="L72">            String username = (String) (subject.getPublicCredentials().toArray()[0]);</span>
+<span class="nc" id="L73">            String password = (String) (subject.getPrivateCredentials().toArray()[0]);</span>
+            // 'domain' parameter is hard-wired between the server and client
+<span class="nc" id="L75">            saslClient = Sasl.createSaslClient(mechs, username, protocol, serverName, null, new SaslClientCallbackHandler(password, entity));</span>
+<span class="nc" id="L76">            return saslClient;</span>
+        } else { // GSSAPI.
+<span class="nc" id="L78">            final Object[] principals = subject.getPrincipals().toArray();</span>
+            // determine client principal from subject.
+<span class="nc" id="L80">            final Principal clientPrincipal = (Principal) principals[0];</span>
+<span class="nc" id="L81">            boolean usingNativeJgss = Boolean.getBoolean(&quot;sun.security.jgss.native&quot;);</span>
+<span class="nc bnc" id="L82" title="All 2 branches missed.">            if (usingNativeJgss) {</span>
+                // http://docs.oracle.com/javase/6/docs/technotes/guides/security/jgss/jgss-features.html
+                // &quot;&quot;&quot;
+                // In addition, when performing operations as a particular
+                // Subject, e.g. Subject.doAs(...) or
+                // Subject.doAsPrivileged(...),
+                // the to-be-used GSSCredential should be added to Subject's
+                // private credential set. Otherwise, the GSS operations will
+                // fail since no credential is found.
+                // &quot;&quot;&quot;
+                try {
+<span class="nc" id="L93">                    GSSManager manager = GSSManager.getInstance();</span>
+<span class="nc" id="L94">                    Oid krb5Mechanism = new Oid(&quot;1.2.840.113554.1.2.2&quot;);</span>
+<span class="nc" id="L95">                    GSSCredential cred = manager.createCredential(null, GSSContext.DEFAULT_LIFETIME, krb5Mechanism, GSSCredential.INITIATE_ONLY);</span>
+<span class="nc" id="L96">                    subject.getPrivateCredentials().add(cred);</span>
+<span class="nc" id="L97">                    LOG.debug(&quot;Added private credential to {} principal name: '{}'&quot;, entity, clientPrincipal);</span>
+<span class="nc" id="L98">                } catch (GSSException ex) {</span>
+<span class="nc" id="L99">                    LOG.warn(&quot;Cannot add private credential to subject; authentication at the server may fail&quot;, ex);</span>
+<span class="nc" id="L100">                }</span>
+            }
+<span class="nc" id="L102">            final KerberosName clientKerberosName = new KerberosName(clientPrincipal.getName());</span>
+            // assume that server and client are in the same realm (by default;
+            // unless the system property
+            // &quot;zookeeper.server.realm&quot; is set).
+<span class="nc" id="L106">            String serverRealm = System.getProperty(&quot;zookeeper.server.realm&quot;, clientKerberosName.getRealm());</span>
+<span class="nc" id="L107">            String modifiedServerPrincipal = servicePrincipal;</span>
+            // If service principal does not contain realm, then add it
+<span class="nc bnc" id="L109" title="All 2 branches missed.">            if (!modifiedServerPrincipal.contains(&quot;@&quot;)) {</span>
+<span class="nc" id="L110">                modifiedServerPrincipal = modifiedServerPrincipal + &quot;@&quot; + serverRealm;</span>
+            }
+<span class="nc" id="L112">            KerberosName serviceKerberosName = new KerberosName(modifiedServerPrincipal);</span>
+<span class="nc" id="L113">            final String serviceName = serviceKerberosName.getServiceName();</span>
+<span class="nc" id="L114">            final String serviceHostname = serviceKerberosName.getHostName();</span>
+<span class="nc" id="L115">            final String clientPrincipalName = clientKerberosName.toString();</span>
+            try {
+<span class="nc" id="L117">                saslClient = Subject.doAs(subject, new PrivilegedExceptionAction&lt;SaslClient&gt;() {</span>
+                    public SaslClient run() throws SaslException {
+<span class="nc" id="L119">                        LOG.info(&quot;{} will use GSSAPI as SASL mechanism.&quot;, entity);</span>
+<span class="nc" id="L120">                        String[] mechs = {&quot;GSSAPI&quot;};</span>
+<span class="nc" id="L121">                        LOG.debug(</span>
+                            &quot;creating sasl client: {}={};service={};serviceHostname={}&quot;,
+                            entity,
+                            clientPrincipalName,
+                            serviceName,
+                            serviceHostname);
+<span class="nc" id="L127">                        SaslClient saslClient = Sasl.createSaslClient(</span>
+                            mechs,
+                            clientPrincipalName,
+                            serviceName,
+                            serviceHostname,
+                            null,
+                            new SaslClientCallbackHandler(null, entity));
+<span class="nc" id="L134">                        return saslClient;</span>
+                    }
+                });
+<span class="nc" id="L137">                return saslClient;</span>
+<span class="nc" id="L138">            } catch (Exception e) {</span>
+<span class="nc" id="L139">                LOG.error(&quot;Exception while trying to create SASL client&quot;, e);</span>
+<span class="nc" id="L140">                return null;</span>
+            }
+        }
+    }
+
+    /**
+     * Create an instance of a SaslServer. It will return null if there is an exception.
+     *
+     * @param subject subject
+     * @param protocol protocol
+     * @param serverName server name
+     * @param callbackHandler login callback handler
+     * @param LOG logger
+     * @return sasl server object
+     */
+    public static SaslServer createSaslServer(
+        final Subject subject,
+        final String protocol,
+        final String serverName,
+        final CallbackHandler callbackHandler,
+        final Logger LOG) {
+<span class="nc bnc" id="L161" title="All 2 branches missed.">        if (subject != null) {</span>
+            // server is using a JAAS-authenticated subject: determine service
+            // principal name and hostname from zk server's subject.
+<span class="nc bnc" id="L164" title="All 2 branches missed.">            if (subject.getPrincipals().size() &gt; 0) {</span>
+                try {
+<span class="nc" id="L166">                    final Object[] principals = subject.getPrincipals().toArray();</span>
+<span class="nc" id="L167">                    final Principal servicePrincipal = (Principal) principals[0];</span>
+
+                    // e.g. servicePrincipalNameAndHostname :=
+                    // &quot;zookeeper/myhost.foo.com@FOO.COM&quot;
+<span class="nc" id="L171">                    final String servicePrincipalNameAndHostname = servicePrincipal.getName();</span>
+
+<span class="nc" id="L173">                    int indexOf = servicePrincipalNameAndHostname.indexOf(&quot;/&quot;);</span>
+
+                    // e.g. servicePrincipalName := &quot;zookeeper&quot;
+<span class="nc" id="L176">                    final String servicePrincipalName = servicePrincipalNameAndHostname.substring(0, indexOf);</span>
+
+                    // e.g. serviceHostnameAndKerbDomain :=
+                    // &quot;myhost.foo.com@FOO.COM&quot;
+<span class="nc" id="L180">                    final String serviceHostnameAndKerbDomain = servicePrincipalNameAndHostname.substring(indexOf + 1);</span>
+
+<span class="nc" id="L182">                    indexOf = serviceHostnameAndKerbDomain.indexOf(&quot;@&quot;);</span>
+                    // e.g. serviceHostname := &quot;myhost.foo.com&quot;
+<span class="nc" id="L184">                    final String serviceHostname = serviceHostnameAndKerbDomain.substring(0, indexOf);</span>
+
+                    // TODO: should depend on zoo.cfg specified mechs, but if
+                    // subject is non-null, it can be assumed to be GSSAPI.
+<span class="nc" id="L188">                    final String mech = &quot;GSSAPI&quot;;</span>
+
+<span class="nc" id="L190">                    LOG.debug(&quot;serviceHostname is '{}'&quot;, serviceHostname);</span>
+<span class="nc" id="L191">                    LOG.debug(&quot;servicePrincipalName is '{}'&quot;, servicePrincipalName);</span>
+<span class="nc" id="L192">                    LOG.debug(&quot;SASL mechanism(mech) is '{}'&quot;, mech);</span>
+
+<span class="nc" id="L194">                    boolean usingNativeJgss = Boolean.getBoolean(&quot;sun.security.jgss.native&quot;);</span>
+<span class="nc bnc" id="L195" title="All 2 branches missed.">                    if (usingNativeJgss) {</span>
+                        // http://docs.oracle.com/javase/6/docs/technotes/guides/security/jgss/jgss-features.html
+                        // &quot;&quot;&quot;
+                        // In addition, when performing operations as a
+                        // particular
+                        // Subject, e.g. Subject.doAs(...) or
+                        // Subject.doAsPrivileged(...), the to-be-used
+                        // GSSCredential should be added to Subject's
+                        // private credential set. Otherwise, the GSS operations
+                        // will fail since no credential is found.
+                        // &quot;&quot;&quot;
+                        try {
+<span class="nc" id="L207">                            GSSManager manager = GSSManager.getInstance();</span>
+<span class="nc" id="L208">                            Oid krb5Mechanism = new Oid(&quot;1.2.840.113554.1.2.2&quot;);</span>
+<span class="nc" id="L209">                            GSSName gssName = manager.createName(</span>
+                                servicePrincipalName + &quot;@&quot; + serviceHostname,
+                                GSSName.NT_HOSTBASED_SERVICE);
+<span class="nc" id="L212">                            GSSCredential cred = manager.createCredential(gssName, GSSContext.DEFAULT_LIFETIME, krb5Mechanism, GSSCredential.ACCEPT_ONLY);</span>
+<span class="nc" id="L213">                            subject.getPrivateCredentials().add(cred);</span>
+<span class="nc" id="L214">                            LOG.debug(</span>
+                                &quot;Added private credential to service principal name: '{}', GSSCredential name: {}&quot;,
+                                servicePrincipalName,
+<span class="nc" id="L217">                                cred.getName());</span>
+<span class="nc" id="L218">                        } catch (GSSException ex) {</span>
+<span class="nc" id="L219">                            LOG.warn(&quot;Cannot add private credential to subject; clients authentication may fail&quot;, ex);</span>
+<span class="nc" id="L220">                        }</span>
+                    }
+                    try {
+<span class="nc" id="L223">                        return Subject.doAs(subject, new PrivilegedExceptionAction&lt;SaslServer&gt;() {</span>
+                            public SaslServer run() {
+                                try {
+                                    SaslServer saslServer;
+<span class="nc" id="L227">                                    saslServer = Sasl.createSaslServer(mech, servicePrincipalName, serviceHostname, null, callbackHandler);</span>
+<span class="nc" id="L228">                                    return saslServer;</span>
+<span class="nc" id="L229">                                } catch (SaslException e) {</span>
+<span class="nc" id="L230">                                    LOG.error(&quot;Zookeeper Server failed to create a SaslServer to interact with a client during session initiation&quot;, e);</span>
+<span class="nc" id="L231">                                    return null;</span>
+                                }
+                            }
+                        });
+<span class="nc" id="L235">                    } catch (PrivilegedActionException e) {</span>
+                        // TODO: exit server at this point(?)
+<span class="nc" id="L237">                        LOG.error(&quot;Zookeeper Quorum member experienced a PrivilegedActionException exception while creating a SaslServer using a JAAS principal context&quot;, e);</span>
+                    }
+<span class="nc" id="L239">                } catch (IndexOutOfBoundsException e) {</span>
+<span class="nc" id="L240">                    LOG.error(&quot;server principal name/hostname determination error&quot;, e);</span>
+<span class="nc" id="L241">                }</span>
+            } else {
+                // JAAS non-GSSAPI authentication: assuming and supporting only
+                // DIGEST-MD5 mechanism for now.
+                // TODO: use 'authMech=' value in zoo.cfg.
+                try {
+<span class="nc" id="L247">                    SaslServer saslServer = Sasl.createSaslServer(&quot;DIGEST-MD5&quot;, protocol, serverName, null, callbackHandler);</span>
+<span class="nc" id="L248">                    return saslServer;</span>
+<span class="nc" id="L249">                } catch (SaslException e) {</span>
+<span class="nc" id="L250">                    LOG.error(&quot;Zookeeper Quorum member failed to create a SaslServer to interact with a client during session initiation&quot;, e);</span>
+                }
+            }
+        }
+<span class="nc" id="L254">        return null;</span>
+    }
+
+    /**
+     * Convert Kerberos principal name pattern to valid Kerberos principal name.
+     * If the principal name contains hostname pattern &quot;_HOST&quot; then it replaces
+     * with the given hostname, which should be fully-qualified domain name.
+     *
+     * @param principalConfig
+     *            the Kerberos principal name conf value to convert
+     * @param hostname
+     *            the fully-qualified domain name used for substitution
+     * @return converted Kerberos principal name
+     */
+    public static String getServerPrincipal(String principalConfig, String hostname) {
+<span class="nc" id="L269">        String[] components = getComponents(principalConfig);</span>
+<span class="nc bnc" id="L270" title="All 6 branches missed.">        if (components == null || components.length != 2 || !components[1].equals(QUORUM_HOSTNAME_PATTERN)) {</span>
+<span class="nc" id="L271">            return principalConfig;</span>
+        } else {
+<span class="nc" id="L273">            return replacePattern(components, hostname);</span>
+        }
+    }
+
+    private static String[] getComponents(String principalConfig) {
+<span class="nc bnc" id="L278" title="All 2 branches missed.">        if (principalConfig == null) {</span>
+<span class="nc" id="L279">            return null;</span>
+        }
+<span class="nc" id="L281">        return principalConfig.split(&quot;[/]&quot;);</span>
+    }
+
+    private static String replacePattern(String[] components, String hostname) {
+<span class="nc" id="L285">        return components[0] + &quot;/&quot; + hostname.toLowerCase();</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AtomicFileWritingIdiom.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.common</a> &gt; <span class="el_source">AtomicFileWritingIdiom.java</span></div><h1>AtomicFileWritingIdiom.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.common;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+
+/*
+ *  Used to perform an atomic write into a file.
+ *  If there is a failure in the middle of the writing operation,
+ *  the original file (if it exists) is left intact.
+ *  Based on the org.apache.zookeeper.server.quorum.QuorumPeer.writeLongToFile(...) idiom
+ *  using the HDFS AtomicFileOutputStream class.
+ */
+public class AtomicFileWritingIdiom {
+
+    public interface OutputStreamStatement {
+
+        void write(OutputStream os) throws IOException;
+
+    }
+
+    public interface WriterStatement {
+
+        void write(Writer os) throws IOException;
+
+    }
+
+    public AtomicFileWritingIdiom(File targetFile, OutputStreamStatement osStmt) throws IOException {
+<span class="nc" id="L50">        this(targetFile, osStmt, null);</span>
+<span class="nc" id="L51">    }</span>
+
+    public AtomicFileWritingIdiom(File targetFile, WriterStatement wStmt) throws IOException {
+<span class="nc" id="L54">        this(targetFile, null, wStmt);</span>
+<span class="nc" id="L55">    }</span>
+
+    private AtomicFileWritingIdiom(
+        File targetFile,
+        OutputStreamStatement osStmt,
+<span class="nc" id="L60">        WriterStatement wStmt) throws IOException {</span>
+<span class="nc" id="L61">        AtomicFileOutputStream out = null;</span>
+<span class="nc" id="L62">        boolean triedToClose = false;</span>
+        try {
+<span class="nc" id="L64">            out = new AtomicFileOutputStream(targetFile);</span>
+<span class="nc bnc" id="L65" title="All 2 branches missed.">            if (wStmt == null) {</span>
+                // execute output stream operation
+<span class="nc" id="L67">                osStmt.write(out);</span>
+            } else {
+<span class="nc" id="L69">                BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(out));</span>
+                // execute writer operation and flush
+<span class="nc" id="L71">                wStmt.write(bw);</span>
+<span class="nc" id="L72">                bw.flush();</span>
+            }
+<span class="nc" id="L74">            triedToClose = true;</span>
+            // close() will do the best to clean up file/resources in case of errors
+            // worst case the tmp file may still exist
+<span class="nc" id="L77">            out.close();</span>
+            // everything went ok
+        } finally {
+            // nothing interesting to do if out == null
+<span class="nc bnc" id="L81" title="All 2 branches missed.">            if (out != null) {</span>
+<span class="nc bnc" id="L82" title="All 2 branches missed.">                if (!triedToClose) {</span>
+                    // worst case here the tmp file/resources(fd) are not cleaned up
+                    // and the caller will be notified (IOException)
+<span class="nc" id="L85">                    out.abort();</span>
+                }
+            }
+        }
+<span class="nc" id="L89">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

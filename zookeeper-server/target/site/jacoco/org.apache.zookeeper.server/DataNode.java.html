@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DataNode.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">DataNode.java</span></div><h1>DataNode.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import org.apache.jute.InputArchive;
+import org.apache.jute.OutputArchive;
+import org.apache.jute.Record;
+import org.apache.zookeeper.data.Stat;
+import org.apache.zookeeper.data.StatPersisted;
+
+/**
+ * This class contains the data for a node in the data tree.
+ * &lt;p&gt;
+ * A data node contains a reference to its parent, a byte array as its data, an
+ * array of ACLs, a stat object, and a set of its children's paths.
+ *
+ */
+@SuppressFBWarnings({&quot;EI_EXPOSE_REP&quot;, &quot;EI_EXPOSE_REP2&quot;})
+public class DataNode implements Record {
+
+    // the digest value of this node, calculated from path, data and stat
+    private volatile long digest;
+
+    // indicate if the digest of this node is up to date or not, used to
+    // optimize the performance.
+    volatile boolean digestCached;
+
+    /** the data for this datanode */
+    byte[] data;
+
+    /**
+     * the acl map long for this datanode. the datatree has the map
+     */
+    Long acl;
+
+    /**
+     * the stat for this node that is persisted to disk.
+     */
+    public StatPersisted stat;
+
+    /**
+     * the list of children for this node. note that the list of children string
+     * does not contain the parent path -- just the last part of the path. This
+     * should be synchronized on except deserializing (for speed up issues).
+     */
+<span class="nc" id="L67">    private Set&lt;String&gt; children = null;</span>
+
+<span class="nc" id="L69">    private static final Set&lt;String&gt; EMPTY_SET = Collections.emptySet();</span>
+
+    /**
+     * default constructor for the datanode
+     */
+<span class="nc" id="L74">    DataNode() {</span>
+        // default constructor
+<span class="nc" id="L76">    }</span>
+
+    /**
+     * create a DataNode with parent, data, acls and stat
+     *
+     * @param data
+     *            the data to be set
+     * @param acl
+     *            the acls for this node
+     * @param stat
+     *            the stat for this node.
+     */
+<span class="nc" id="L88">    public DataNode(byte[] data, Long acl, StatPersisted stat) {</span>
+<span class="nc" id="L89">        this.data = data;</span>
+<span class="nc" id="L90">        this.acl = acl;</span>
+<span class="nc" id="L91">        this.stat = stat;</span>
+<span class="nc" id="L92">    }</span>
+
+    /**
+     * Method that inserts a child into the children set
+     *
+     * @param child
+     *            to be inserted
+     * @return true if this set did not already contain the specified element
+     */
+    public synchronized boolean addChild(String child) {
+<span class="nc bnc" id="L102" title="All 2 branches missed.">        if (children == null) {</span>
+            // let's be conservative on the typical number of children
+<span class="nc" id="L104">            children = new HashSet&lt;String&gt;(8);</span>
+        }
+<span class="nc" id="L106">        return children.add(child);</span>
+    }
+
+    /**
+     * Method that removes a child from the children set
+     *
+     * @param child
+     * @return true if this set contained the specified element
+     */
+    public synchronized boolean removeChild(String child) {
+<span class="nc bnc" id="L116" title="All 2 branches missed.">        if (children == null) {</span>
+<span class="nc" id="L117">            return false;</span>
+        }
+<span class="nc" id="L119">        return children.remove(child);</span>
+    }
+
+    /**
+     * convenience method for setting the children for this datanode
+     *
+     * @param children
+     */
+    public synchronized void setChildren(HashSet&lt;String&gt; children) {
+<span class="nc" id="L128">        this.children = children;</span>
+<span class="nc" id="L129">    }</span>
+
+    /**
+     * convenience methods to get the children
+     *
+     * @return the children of this datanode. If the datanode has no children, empty
+     *         set is returned
+     */
+    public synchronized Set&lt;String&gt; getChildren() {
+<span class="nc bnc" id="L138" title="All 2 branches missed.">        if (children == null) {</span>
+<span class="nc" id="L139">            return EMPTY_SET;</span>
+        }
+
+<span class="nc" id="L142">        return Collections.unmodifiableSet(children);</span>
+    }
+
+    public synchronized void copyStat(Stat to) {
+<span class="nc" id="L146">        to.setAversion(stat.getAversion());</span>
+<span class="nc" id="L147">        to.setCtime(stat.getCtime());</span>
+<span class="nc" id="L148">        to.setCzxid(stat.getCzxid());</span>
+<span class="nc" id="L149">        to.setMtime(stat.getMtime());</span>
+<span class="nc" id="L150">        to.setMzxid(stat.getMzxid());</span>
+<span class="nc" id="L151">        to.setPzxid(stat.getPzxid());</span>
+<span class="nc" id="L152">        to.setVersion(stat.getVersion());</span>
+<span class="nc" id="L153">        to.setEphemeralOwner(getClientEphemeralOwner(stat));</span>
+<span class="nc bnc" id="L154" title="All 2 branches missed.">        to.setDataLength(data == null ? 0 : data.length);</span>
+<span class="nc" id="L155">        int numChildren = 0;</span>
+<span class="nc bnc" id="L156" title="All 2 branches missed.">        if (this.children != null) {</span>
+<span class="nc" id="L157">            numChildren = children.size();</span>
+        }
+        // when we do the Cversion we need to translate from the count of the creates
+        // to the count of the changes (v3 semantics)
+        // for every create there is a delete except for the children still present
+<span class="nc" id="L162">        to.setCversion(stat.getCversion() * 2 - numChildren);</span>
+<span class="nc" id="L163">        to.setNumChildren(numChildren);</span>
+<span class="nc" id="L164">    }</span>
+
+    private static long getClientEphemeralOwner(StatPersisted stat) {
+<span class="nc" id="L167">        EphemeralType ephemeralType = EphemeralType.get(stat.getEphemeralOwner());</span>
+<span class="nc bnc" id="L168" title="All 2 branches missed.">        if (ephemeralType != EphemeralType.NORMAL) {</span>
+<span class="nc" id="L169">            return 0;</span>
+        }
+<span class="nc" id="L171">        return stat.getEphemeralOwner();</span>
+    }
+
+    public synchronized void deserialize(InputArchive archive, String tag) throws IOException {
+<span class="nc" id="L175">        archive.startRecord(&quot;node&quot;);</span>
+<span class="nc" id="L176">        data = archive.readBuffer(&quot;data&quot;);</span>
+<span class="nc" id="L177">        acl = archive.readLong(&quot;acl&quot;);</span>
+<span class="nc" id="L178">        stat = new StatPersisted();</span>
+<span class="nc" id="L179">        stat.deserialize(archive, &quot;statpersisted&quot;);</span>
+<span class="nc" id="L180">        archive.endRecord(&quot;node&quot;);</span>
+<span class="nc" id="L181">    }</span>
+
+    public synchronized void serialize(OutputArchive archive, String tag) throws IOException {
+<span class="nc" id="L184">        archive.startRecord(this, &quot;node&quot;);</span>
+<span class="nc" id="L185">        archive.writeBuffer(data, &quot;data&quot;);</span>
+<span class="nc" id="L186">        archive.writeLong(acl, &quot;acl&quot;);</span>
+<span class="nc" id="L187">        stat.serialize(archive, &quot;statpersisted&quot;);</span>
+<span class="nc" id="L188">        archive.endRecord(this, &quot;node&quot;);</span>
+<span class="nc" id="L189">    }</span>
+
+    public boolean isDigestCached() {
+<span class="nc" id="L192">        return digestCached;</span>
+    }
+
+    public void setDigestCached(boolean digestCached) {
+<span class="nc" id="L196">        this.digestCached = digestCached;</span>
+<span class="nc" id="L197">    }</span>
+
+    public long getDigest() {
+<span class="nc" id="L200">        return digest;</span>
+    }
+
+    public void setDigest(long digest) {
+<span class="nc" id="L204">        this.digest = digest;</span>
+<span class="nc" id="L205">    }</span>
+
+    public synchronized byte[] getData() {
+<span class="nc" id="L208">        return data;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

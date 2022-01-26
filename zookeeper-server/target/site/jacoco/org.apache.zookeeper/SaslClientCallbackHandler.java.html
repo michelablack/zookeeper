@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SaslClientCallbackHandler.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper</a> &gt; <span class="el_source">SaslClientCallbackHandler.java</span></div><h1>SaslClientCallbackHandler.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper;
+
+import javax.security.auth.callback.Callback;
+import javax.security.auth.callback.CallbackHandler;
+import javax.security.auth.callback.NameCallback;
+import javax.security.auth.callback.PasswordCallback;
+import javax.security.auth.callback.UnsupportedCallbackException;
+import javax.security.sasl.AuthorizeCallback;
+import javax.security.sasl.RealmCallback;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This is used by the SASL mechanisms to get further information to complete
+ * the authentication. For example, a SASL mechanism might use this callback
+ * handler to do verification operation. The CallbackHandler interface here
+ * refers to javax.security.auth.callback.CallbackHandler. It should not be
+ * confused with ZooKeeper packet callbacks like
+ * org.apache.zookeeper.server.auth.SaslServerCallbackHandler.
+ */
+public class SaslClientCallbackHandler implements CallbackHandler {
+
+<span class="nc" id="L41">    private String password = null;</span>
+<span class="nc" id="L42">    private static final Logger LOG = LoggerFactory.getLogger(SaslClientCallbackHandler.class);</span>
+    private final String entity;
+<span class="nc" id="L44">    public SaslClientCallbackHandler(String password, String client) {</span>
+<span class="nc" id="L45">        this.password = password;</span>
+<span class="nc" id="L46">        this.entity = client;</span>
+<span class="nc" id="L47">    }</span>
+
+    public void handle(Callback[] callbacks) throws UnsupportedCallbackException {
+<span class="nc bnc" id="L50" title="All 2 branches missed.">        for (Callback callback : callbacks) {</span>
+<span class="nc bnc" id="L51" title="All 2 branches missed.">            if (callback instanceof NameCallback) {</span>
+<span class="nc" id="L52">                NameCallback nc = (NameCallback) callback;</span>
+<span class="nc" id="L53">                nc.setName(nc.getDefaultName());</span>
+<span class="nc" id="L54">            } else {</span>
+<span class="nc bnc" id="L55" title="All 2 branches missed.">                if (callback instanceof PasswordCallback) {</span>
+<span class="nc" id="L56">                    PasswordCallback pc = (PasswordCallback) callback;</span>
+<span class="nc bnc" id="L57" title="All 2 branches missed.">                    if (password != null) {</span>
+<span class="nc" id="L58">                        pc.setPassword(this.password.toCharArray());</span>
+                    } else {
+<span class="nc" id="L60">                        LOG.warn(</span>
+                            &quot;Could not login: the {} is being asked for a password, but the ZooKeeper {}&quot;
+                                + &quot; code does not currently support obtaining a password from the user.&quot;
+                                + &quot; Make sure that the {} is configured to use a ticket cache (using&quot;
+                                + &quot; the JAAS configuration setting 'useTicketCache=true)' and restart the {}. If&quot;
+                                + &quot; you still get this message after that, the TGT in the ticket cache has expired and must&quot;
+                                + &quot; be manually refreshed. To do so, first determine if you are using a password or a&quot;
+                                + &quot; keytab. If the former, run kinit in a Unix shell in the environment of the user who&quot;
+                                + &quot; is running this Zookeeper {} using the command&quot;
+                                + &quot; 'kinit &lt;princ&gt;' (where &lt;princ&gt; is the name of the {}'s Kerberos principal).&quot;
+                                + &quot; If the latter, do&quot;
+                                + &quot; 'kinit -k -t &lt;keytab&gt; &lt;princ&gt;' (where &lt;princ&gt; is the name of the Kerberos principal, and&quot;
+                                + &quot; &lt;keytab&gt; is the location of the keytab file). After manually refreshing your cache,&quot;
+                                + &quot; restart this {}. If you continue to see this message after manually refreshing&quot;
+                                + &quot; your cache, ensure that your KDC host's clock is in sync with this host's clock.&quot;,
+                            entity,
+                            entity,
+                            entity,
+                            entity,
+                            entity,
+                            entity,
+                            entity);
+                    }
+<span class="nc" id="L83">                } else {</span>
+<span class="nc bnc" id="L84" title="All 2 branches missed.">                    if (callback instanceof RealmCallback) {</span>
+<span class="nc" id="L85">                        RealmCallback rc = (RealmCallback) callback;</span>
+<span class="nc" id="L86">                        rc.setText(rc.getDefaultText());</span>
+<span class="nc" id="L87">                    } else {</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">                        if (callback instanceof AuthorizeCallback) {</span>
+<span class="nc" id="L89">                            AuthorizeCallback ac = (AuthorizeCallback) callback;</span>
+<span class="nc" id="L90">                            String authid = ac.getAuthenticationID();</span>
+<span class="nc" id="L91">                            String authzid = ac.getAuthorizationID();</span>
+<span class="nc bnc" id="L92" title="All 2 branches missed.">                            if (authid.equals(authzid)) {</span>
+<span class="nc" id="L93">                                ac.setAuthorized(true);</span>
+                            } else {
+<span class="nc" id="L95">                                ac.setAuthorized(false);</span>
+                            }
+<span class="nc bnc" id="L97" title="All 2 branches missed.">                            if (ac.isAuthorized()) {</span>
+<span class="nc" id="L98">                                ac.setAuthorizedID(authzid);</span>
+                            }
+<span class="nc" id="L100">                        } else {</span>
+<span class="nc" id="L101">                            throw new UnsupportedCallbackException(</span>
+                                callback,
+                                &quot;Unrecognized SASL &quot; + entity + &quot;Callback&quot;);
+                        }
+                    }
+                }
+            }
+        }
+<span class="nc" id="L109">    }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

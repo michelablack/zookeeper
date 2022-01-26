@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ZKAuditProvider.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.audit</a> &gt; <span class="el_source">ZKAuditProvider.java</span></div><h1>ZKAuditProvider.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.zookeeper.audit;
+
+import static org.apache.zookeeper.audit.AuditEvent.FieldName;
+import java.lang.reflect.Constructor;
+import org.apache.zookeeper.audit.AuditEvent.Result;
+import org.apache.zookeeper.server.ServerCnxnFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+<span class="nc" id="L27">public class ZKAuditProvider {</span>
+    static final String AUDIT_ENABLE = &quot;zookeeper.audit.enable&quot;;
+    static final String AUDIT_IMPL_CLASS = &quot;zookeeper.audit.impl.class&quot;;
+<span class="nc" id="L30">    private static final Logger LOG = LoggerFactory.getLogger(ZKAuditProvider.class);</span>
+    // By default audit logging is disabled
+    private static boolean auditEnabled;
+    private static AuditLogger auditLogger;
+
+    static {
+<span class="nc" id="L36">        auditEnabled = Boolean.getBoolean(AUDIT_ENABLE);</span>
+<span class="nc bnc" id="L37" title="All 2 branches missed.">        if (auditEnabled) {</span>
+            //initialise only when audit logging is enabled
+<span class="nc" id="L39">            auditLogger = getAuditLogger();</span>
+<span class="nc" id="L40">            LOG.info(&quot;ZooKeeper audit is enabled.&quot;);</span>
+        } else {
+<span class="nc" id="L42">            LOG.info(&quot;ZooKeeper audit is disabled.&quot;);</span>
+        }
+<span class="nc" id="L44">    }</span>
+
+    private static AuditLogger getAuditLogger() {
+<span class="nc" id="L47">        String auditLoggerClass = System.getProperty(AUDIT_IMPL_CLASS);</span>
+<span class="nc bnc" id="L48" title="All 2 branches missed.">        if (auditLoggerClass == null) {</span>
+<span class="nc" id="L49">            auditLoggerClass = Log4jAuditLogger.class.getName();</span>
+        }
+        try {
+<span class="nc" id="L52">            Constructor&lt;?&gt; clientCxnConstructor = Class.forName(auditLoggerClass)</span>
+<span class="nc" id="L53">                    .getDeclaredConstructor();</span>
+<span class="nc" id="L54">            AuditLogger auditLogger = (AuditLogger) clientCxnConstructor.newInstance();</span>
+<span class="nc" id="L55">            auditLogger.initialize();</span>
+<span class="nc" id="L56">            return auditLogger;</span>
+<span class="nc" id="L57">        } catch (Exception e) {</span>
+<span class="nc" id="L58">            throw new RuntimeException(&quot;Couldn't instantiate &quot; + auditLoggerClass, e);</span>
+        }
+    }
+
+    /**
+     * @return true if audit log is enabled
+     */
+    public static boolean isAuditEnabled() {
+<span class="nc" id="L66">        return auditEnabled;</span>
+    }
+
+    public static void log(String user, String operation, String znode, String acl,
+                           String createMode, String session, String ip, Result result) {
+<span class="nc" id="L71">        auditLogger.logAuditEvent(createLogEvent(user, operation, znode, acl, createMode, session, ip, result));</span>
+<span class="nc" id="L72">    }</span>
+
+    /**
+     * A helper api for creating an AuditEvent object.
+     */
+    static AuditEvent createLogEvent(String user, String operation, Result result) {
+<span class="nc" id="L78">        AuditEvent event = new AuditEvent(result);</span>
+<span class="nc" id="L79">        event.addEntry(FieldName.USER, user);</span>
+<span class="nc" id="L80">        event.addEntry(FieldName.OPERATION, operation);</span>
+<span class="nc" id="L81">        return event;</span>
+    }
+
+    /**
+     * A helper api for creating an AuditEvent object.
+     */
+    static AuditEvent createLogEvent(String user, String operation, String znode, String acl,
+                                     String createMode, String session, String ip, Result result) {
+<span class="nc" id="L89">        AuditEvent event = new AuditEvent(result);</span>
+<span class="nc" id="L90">        event.addEntry(FieldName.SESSION, session);</span>
+<span class="nc" id="L91">        event.addEntry(FieldName.USER, user);</span>
+<span class="nc" id="L92">        event.addEntry(FieldName.IP, ip);</span>
+<span class="nc" id="L93">        event.addEntry(FieldName.OPERATION, operation);</span>
+<span class="nc" id="L94">        event.addEntry(FieldName.ZNODE, znode);</span>
+<span class="nc" id="L95">        event.addEntry(FieldName.ZNODE_TYPE, createMode);</span>
+<span class="nc" id="L96">        event.addEntry(FieldName.ACL, acl);</span>
+<span class="nc" id="L97">        return event;</span>
+    }
+
+    /**
+     * Add audit log for server start and register server stop log.
+     */
+    public static void addZKStartStopAuditLog() {
+<span class="nc bnc" id="L104" title="All 2 branches missed.">        if (isAuditEnabled()) {</span>
+<span class="nc" id="L105">            log(getZKUser(), AuditConstants.OP_START, Result.SUCCESS);</span>
+<span class="nc" id="L106">            Runtime.getRuntime().addShutdownHook(new Thread(() -&gt; {</span>
+<span class="nc" id="L107">                log(getZKUser(), AuditConstants.OP_STOP, Result.INVOKED);</span>
+<span class="nc" id="L108">            }));</span>
+        }
+<span class="nc" id="L110">    }</span>
+
+    /**
+     * Add audit log for server start fail.
+     */
+    public static void addServerStartFailureAuditLog() {
+<span class="nc bnc" id="L116" title="All 2 branches missed.">        if (isAuditEnabled()) {</span>
+<span class="nc" id="L117">            log(ZKAuditProvider.getZKUser(), AuditConstants.OP_START, Result.FAILURE);</span>
+        }
+<span class="nc" id="L119">    }</span>
+
+    private static void log(String user, String operation, Result result) {
+<span class="nc" id="L122">        auditLogger.logAuditEvent(createLogEvent(user, operation, result));</span>
+<span class="nc" id="L123">    }</span>
+
+    /**
+     * User who has started the ZooKeeper server user, it will be the logged-in
+     * user. If no user logged-in then system user.
+     */
+    public static String getZKUser() {
+<span class="nc" id="L130">        return ServerCnxnFactory.getUserName();</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>OSMXBean.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.util</a> &gt; <span class="el_source">OSMXBean.java</span></div><h1>OSMXBean.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.util;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
+import java.lang.management.RuntimeMXBean;
+import java.lang.reflect.Method;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This class is a wrapper for the implementation of
+ * com.sun.management.UnixOperatingSystemMXBean
+ * It will decide to use the sun api or its own implementation
+ * depending on the runtime (vendor) used.
+ */
+public class OSMXBean {
+
+<span class="nc" id="L40">    private static final Logger LOG = LoggerFactory.getLogger(OSMXBean.class);</span>
+
+    private OperatingSystemMXBean osMbean;
+
+<span class="nc" id="L44">    private static final boolean ibmvendor = System.getProperty(&quot;java.vendor&quot;).contains(&quot;IBM&quot;);</span>
+<span class="nc" id="L45">    private static final boolean windows = System.getProperty(&quot;os.name&quot;).startsWith(&quot;Windows&quot;);</span>
+<span class="nc" id="L46">    private static final boolean linux = System.getProperty(&quot;os.name&quot;).startsWith(&quot;Linux&quot;);</span>
+
+    /**
+     * Constructor. Get the running Operating System instance
+     */
+<span class="nc" id="L51">    public OSMXBean() {</span>
+<span class="nc" id="L52">        this.osMbean = ManagementFactory.getOperatingSystemMXBean();</span>
+<span class="nc" id="L53">    }</span>
+
+    /**
+     * Check if the OS is unix. If using the IBM java runtime, this
+     * will only work for linux.
+     *
+     * @return whether this is unix or not.
+     */
+    public boolean getUnix() {
+<span class="nc bnc" id="L62" title="All 2 branches missed.">        if (windows) {</span>
+<span class="nc" id="L63">            return false;</span>
+        }
+<span class="nc bnc" id="L65" title="All 4 branches missed.">        return (!ibmvendor || linux);</span>
+    }
+
+    /**
+     * Load the implementation of UnixOperatingSystemMXBean for sun jvm
+     * and runs the desired method.
+     * @param mBeanMethodName : method to run from the interface UnixOperatingSystemMXBean
+     * @return the method result
+     */
+    private Long getOSUnixMXBeanMethod(String mBeanMethodName) {
+        Object unixos;
+        Class&lt;?&gt; classRef;
+        Method mBeanMethod;
+
+        try {
+<span class="nc" id="L80">            classRef = Class.forName(&quot;com.sun.management.UnixOperatingSystemMXBean&quot;);</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">            if (classRef.isInstance(osMbean)) {</span>
+<span class="nc" id="L82">                mBeanMethod = classRef.getDeclaredMethod(mBeanMethodName);</span>
+<span class="nc" id="L83">                unixos = classRef.cast(osMbean);</span>
+<span class="nc" id="L84">                return (Long) mBeanMethod.invoke(unixos);</span>
+            }
+<span class="nc" id="L86">        } catch (Exception e) {</span>
+<span class="nc" id="L87">            LOG.warn(&quot;Not able to load class or method for com.sun.managment.UnixOperatingSystemMXBean.&quot;, e);</span>
+<span class="nc" id="L88">        }</span>
+<span class="nc" id="L89">        return null;</span>
+    }
+
+    /**
+     * Get the number of opened filed descriptor for the runtime jvm.
+     * If sun java, it will use the com.sun.management interfaces.
+     * Otherwise, this methods implements it (linux only).
+     * @return number of open file descriptors for the jvm
+     */
+    public long getOpenFileDescriptorCount() {
+        Long ofdc;
+
+<span class="nc bnc" id="L101" title="All 2 branches missed.">        if (!ibmvendor) {</span>
+<span class="nc" id="L102">            ofdc = getOSUnixMXBeanMethod(&quot;getOpenFileDescriptorCount&quot;);</span>
+<span class="nc bnc" id="L103" title="All 2 branches missed.">            return (ofdc != null ? ofdc.longValue() : -1);</span>
+        }
+
+        try {
+            //need to get the PID number of the process first
+<span class="nc" id="L108">            RuntimeMXBean rtmbean = ManagementFactory.getRuntimeMXBean();</span>
+<span class="nc" id="L109">            String rtname = rtmbean.getName();</span>
+<span class="nc" id="L110">            String[] pidhost = rtname.split(&quot;@&quot;);</span>
+
+            //using linux bash commands to retrieve info
+<span class="nc" id="L113">            Process p = Runtime.getRuntime()</span>
+<span class="nc" id="L114">                               .exec(new String[]{&quot;bash&quot;, &quot;-c&quot;, &quot;ls /proc/&quot; + pidhost[0] + &quot;/fdinfo | wc -l&quot;});</span>
+<span class="nc" id="L115">            InputStream in = p.getInputStream();</span>
+<span class="nc" id="L116">            BufferedReader output = new BufferedReader(new InputStreamReader(in));</span>
+
+            try {
+                String openFileDesCount;
+<span class="nc bnc" id="L120" title="All 2 branches missed.">                if ((openFileDesCount = output.readLine()) != null) {</span>
+<span class="nc" id="L121">                    return Long.parseLong(openFileDesCount);</span>
+                }
+            } finally {
+<span class="nc bnc" id="L124" title="All 2 branches missed.">                if (output != null) {</span>
+<span class="nc" id="L125">                    output.close();</span>
+                }
+            }
+<span class="nc" id="L128">        } catch (IOException ie) {</span>
+<span class="nc" id="L129">            LOG.warn(&quot;Not able to get the number of open file descriptors&quot;, ie);</span>
+<span class="nc" id="L130">        }</span>
+<span class="nc" id="L131">        return -1;</span>
+    }
+
+    /**
+     * Get the number of the maximum file descriptors the system can use.
+     * If sun java, it will use the com.sun.management interfaces.
+     * Otherwise, this methods implements it (linux only).
+     * @return max number of file descriptors the operating system can use.
+     */
+    public long getMaxFileDescriptorCount() {
+        Long mfdc;
+
+<span class="nc bnc" id="L143" title="All 2 branches missed.">        if (!ibmvendor) {</span>
+<span class="nc" id="L144">            mfdc = getOSUnixMXBeanMethod(&quot;getMaxFileDescriptorCount&quot;);</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">            return (mfdc != null ? mfdc.longValue() : -1);</span>
+        }
+
+        try {
+            //using linux bash commands to retrieve info
+<span class="nc" id="L150">            Process p = Runtime.getRuntime().exec(new String[]{&quot;bash&quot;, &quot;-c&quot;, &quot;ulimit -n&quot;});</span>
+<span class="nc" id="L151">            InputStream in = p.getInputStream();</span>
+<span class="nc" id="L152">            BufferedReader output = new BufferedReader(new InputStreamReader(in));</span>
+
+            try {
+                String maxFileDesCount;
+<span class="nc bnc" id="L156" title="All 2 branches missed.">                if ((maxFileDesCount = output.readLine()) != null) {</span>
+<span class="nc" id="L157">                    return Long.parseLong(maxFileDesCount);</span>
+                }
+            } finally {
+<span class="nc bnc" id="L160" title="All 2 branches missed.">                if (output != null) {</span>
+<span class="nc" id="L161">                    output.close();</span>
+                }
+            }
+<span class="nc" id="L164">        } catch (IOException ie) {</span>
+<span class="nc" id="L165">            LOG.warn(&quot;Not able to get the max number of file descriptors&quot;, ie);</span>
+<span class="nc" id="L166">        }</span>
+<span class="nc" id="L167">        return -1;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

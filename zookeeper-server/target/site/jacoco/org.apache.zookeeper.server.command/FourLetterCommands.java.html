@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>FourLetterCommands.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.command</a> &gt; <span class="el_source">FourLetterCommands.java</span></div><h1>FourLetterCommands.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.command;
+
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This class contains constants for all the four letter commands
+ */
+<span class="nc" id="L33">public class FourLetterCommands {</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L39">    public static final int confCmd = ByteBuffer.wrap(&quot;conf&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L45">    public static final int consCmd = ByteBuffer.wrap(&quot;cons&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L51">    public static final int crstCmd = ByteBuffer.wrap(&quot;crst&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L57">    public static final int dirsCmd = ByteBuffer.wrap(&quot;dirs&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L63">    public static final int dumpCmd = ByteBuffer.wrap(&quot;dump&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L69">    public static final int enviCmd = ByteBuffer.wrap(&quot;envi&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L75">    public static final int getTraceMaskCmd = ByteBuffer.wrap(&quot;gtmk&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L81">    public static final int ruokCmd = ByteBuffer.wrap(&quot;ruok&quot;.getBytes()).getInt();</span>
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L86">    public static final int setTraceMaskCmd = ByteBuffer.wrap(&quot;stmk&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L92">    public static final int srvrCmd = ByteBuffer.wrap(&quot;srvr&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L98">    public static final int srstCmd = ByteBuffer.wrap(&quot;srst&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L104">    public static final int statCmd = ByteBuffer.wrap(&quot;stat&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L110">    public static final int wchcCmd = ByteBuffer.wrap(&quot;wchc&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L116">    public static final int wchpCmd = ByteBuffer.wrap(&quot;wchp&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L122">    public static final int wchsCmd = ByteBuffer.wrap(&quot;wchs&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L128">    public static final int mntrCmd = ByteBuffer.wrap(&quot;mntr&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L134">    public static final int isroCmd = ByteBuffer.wrap(&quot;isro&quot;.getBytes()).getInt();</span>
+
+    /*
+     * See &lt;a href=&quot;{@docRoot}/../../../docs/zookeeperAdmin.html#sc_zkCommands&quot;&gt;
+     * Zk Admin&lt;/a&gt;. this link is for all the commands.
+     */
+<span class="nc" id="L140">    protected static final int hashCmd = ByteBuffer.wrap(&quot;hash&quot;.getBytes()).getInt();</span>
+
+    /*
+     * The control sequence sent by the telnet program when it closes a
+     * connection. Include simply to keep the logs cleaner (the server would
+     * close the connection anyway because it would parse this as a negative
+     * length).
+     */
+    public static final int telnetCloseCmd = 0xfff4fffd;
+
+    private static final String ZOOKEEPER_4LW_COMMANDS_WHITELIST = &quot;zookeeper.4lw.commands.whitelist&quot;;
+
+<span class="nc" id="L152">    private static final Logger LOG = LoggerFactory.getLogger(FourLetterCommands.class);</span>
+
+<span class="nc" id="L154">    private static final Map&lt;Integer, String&gt; cmd2String = new HashMap&lt;Integer, String&gt;();</span>
+
+<span class="nc" id="L156">    private static final Set&lt;String&gt; whiteListedCommands = new HashSet&lt;String&gt;();</span>
+
+<span class="nc" id="L158">    private static boolean whiteListInitialized = false;</span>
+
+    // @VisibleForTesting
+    public static synchronized void resetWhiteList() {
+<span class="nc" id="L162">        whiteListInitialized = false;</span>
+<span class="nc" id="L163">        whiteListedCommands.clear();</span>
+<span class="nc" id="L164">    }</span>
+
+    /**
+     * Return the string representation of the specified command code.
+     */
+    public static String getCommandString(int command) {
+<span class="nc" id="L170">        return cmd2String.get(command);</span>
+    }
+
+    /**
+     * Check if the specified command code is from a known command.
+     *
+     * @param command The integer code of command.
+     * @return true if the specified command is known, false otherwise.
+     */
+    public static boolean isKnown(int command) {
+<span class="nc" id="L180">        return cmd2String.containsKey(command);</span>
+    }
+
+    /**
+     * Check if the specified command is enabled.
+     *
+     * In ZOOKEEPER-2693 we introduce a configuration option to only
+     * allow a specific set of white listed commands to execute.
+     * A command will only be executed if it is also configured
+     * in the white list.
+     *
+     * @param command The command string.
+     * @return true if the specified command is enabled
+     */
+    public static synchronized boolean isEnabled(String command) {
+<span class="nc bnc" id="L195" title="All 2 branches missed.">        if (whiteListInitialized) {</span>
+<span class="nc" id="L196">            return whiteListedCommands.contains(command);</span>
+        }
+
+<span class="nc" id="L199">        String commands = System.getProperty(ZOOKEEPER_4LW_COMMANDS_WHITELIST);</span>
+<span class="nc bnc" id="L200" title="All 2 branches missed.">        if (commands != null) {</span>
+<span class="nc" id="L201">            String[] list = commands.split(&quot;,&quot;);</span>
+<span class="nc bnc" id="L202" title="All 2 branches missed.">            for (String cmd : list) {</span>
+<span class="nc bnc" id="L203" title="All 2 branches missed.">                if (cmd.trim().equals(&quot;*&quot;)) {</span>
+<span class="nc bnc" id="L204" title="All 2 branches missed.">                    for (Map.Entry&lt;Integer, String&gt; entry : cmd2String.entrySet()) {</span>
+<span class="nc" id="L205">                        whiteListedCommands.add(entry.getValue());</span>
+<span class="nc" id="L206">                    }</span>
+<span class="nc" id="L207">                    break;</span>
+                }
+<span class="nc bnc" id="L209" title="All 2 branches missed.">                if (!cmd.trim().isEmpty()) {</span>
+<span class="nc" id="L210">                    whiteListedCommands.add(cmd.trim());</span>
+                }
+            }
+        }
+
+        // It is sad that isro and srvr are used by ZooKeeper itself. Need fix this
+        // before deprecating 4lw.
+<span class="nc bnc" id="L217" title="All 2 branches missed.">        if (System.getProperty(&quot;readonlymode.enabled&quot;, &quot;false&quot;).equals(&quot;true&quot;)) {</span>
+<span class="nc" id="L218">            whiteListedCommands.add(&quot;isro&quot;);</span>
+        }
+        // zkServer.sh depends on &quot;srvr&quot;.
+<span class="nc" id="L221">        whiteListedCommands.add(&quot;srvr&quot;);</span>
+<span class="nc" id="L222">        whiteListInitialized = true;</span>
+<span class="nc" id="L223">        LOG.info(&quot;The list of known four letter word commands is : {}&quot;, Arrays.asList(cmd2String));</span>
+<span class="nc" id="L224">        LOG.info(&quot;The list of enabled four letter word commands is : {}&quot;, Arrays.asList(whiteListedCommands));</span>
+<span class="nc" id="L225">        return whiteListedCommands.contains(command);</span>
+    }
+
+    // specify all of the commands that are available
+    static {
+<span class="nc" id="L230">        cmd2String.put(confCmd, &quot;conf&quot;);</span>
+<span class="nc" id="L231">        cmd2String.put(consCmd, &quot;cons&quot;);</span>
+<span class="nc" id="L232">        cmd2String.put(crstCmd, &quot;crst&quot;);</span>
+<span class="nc" id="L233">        cmd2String.put(dirsCmd, &quot;dirs&quot;);</span>
+<span class="nc" id="L234">        cmd2String.put(dumpCmd, &quot;dump&quot;);</span>
+<span class="nc" id="L235">        cmd2String.put(enviCmd, &quot;envi&quot;);</span>
+<span class="nc" id="L236">        cmd2String.put(getTraceMaskCmd, &quot;gtmk&quot;);</span>
+<span class="nc" id="L237">        cmd2String.put(ruokCmd, &quot;ruok&quot;);</span>
+<span class="nc" id="L238">        cmd2String.put(setTraceMaskCmd, &quot;stmk&quot;);</span>
+<span class="nc" id="L239">        cmd2String.put(srstCmd, &quot;srst&quot;);</span>
+<span class="nc" id="L240">        cmd2String.put(srvrCmd, &quot;srvr&quot;);</span>
+<span class="nc" id="L241">        cmd2String.put(statCmd, &quot;stat&quot;);</span>
+<span class="nc" id="L242">        cmd2String.put(wchcCmd, &quot;wchc&quot;);</span>
+<span class="nc" id="L243">        cmd2String.put(wchpCmd, &quot;wchp&quot;);</span>
+<span class="nc" id="L244">        cmd2String.put(wchsCmd, &quot;wchs&quot;);</span>
+<span class="nc" id="L245">        cmd2String.put(mntrCmd, &quot;mntr&quot;);</span>
+<span class="nc" id="L246">        cmd2String.put(isroCmd, &quot;isro&quot;);</span>
+<span class="nc" id="L247">        cmd2String.put(telnetCloseCmd, &quot;telnet close&quot;);</span>
+<span class="nc" id="L248">        cmd2String.put(hashCmd, &quot;hash&quot;);</span>
+<span class="nc" id="L249">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

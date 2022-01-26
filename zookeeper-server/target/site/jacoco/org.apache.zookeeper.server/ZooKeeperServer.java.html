@@ -1,0 +1,2336 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ZooKeeperServer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server</a> &gt; <span class="el_source">ZooKeeperServer.java</span></div><h1>ZooKeeperServer.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
+import javax.security.sasl.SaslException;
+import org.apache.jute.BinaryInputArchive;
+import org.apache.jute.BinaryOutputArchive;
+import org.apache.jute.Record;
+import org.apache.zookeeper.Environment;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.Code;
+import org.apache.zookeeper.KeeperException.SessionExpiredException;
+import org.apache.zookeeper.Quotas;
+import org.apache.zookeeper.StatsTrack;
+import org.apache.zookeeper.Version;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.ZooDefs.OpCode;
+import org.apache.zookeeper.ZookeeperBanner;
+import org.apache.zookeeper.common.PathUtils;
+import org.apache.zookeeper.common.StringUtils;
+import org.apache.zookeeper.common.Time;
+import org.apache.zookeeper.data.ACL;
+import org.apache.zookeeper.data.Id;
+import org.apache.zookeeper.data.StatPersisted;
+import org.apache.zookeeper.jmx.MBeanRegistry;
+import org.apache.zookeeper.metrics.MetricsContext;
+import org.apache.zookeeper.proto.AuthPacket;
+import org.apache.zookeeper.proto.ConnectRequest;
+import org.apache.zookeeper.proto.ConnectResponse;
+import org.apache.zookeeper.proto.CreateRequest;
+import org.apache.zookeeper.proto.DeleteRequest;
+import org.apache.zookeeper.proto.GetSASLRequest;
+import org.apache.zookeeper.proto.ReplyHeader;
+import org.apache.zookeeper.proto.RequestHeader;
+import org.apache.zookeeper.proto.SetACLRequest;
+import org.apache.zookeeper.proto.SetDataRequest;
+import org.apache.zookeeper.proto.SetSASLResponse;
+import org.apache.zookeeper.server.DataTree.ProcessTxnResult;
+import org.apache.zookeeper.server.RequestProcessor.RequestProcessorException;
+import org.apache.zookeeper.server.ServerCnxn.CloseRequestException;
+import org.apache.zookeeper.server.SessionTracker.Session;
+import org.apache.zookeeper.server.SessionTracker.SessionExpirer;
+import org.apache.zookeeper.server.auth.ProviderRegistry;
+import org.apache.zookeeper.server.auth.ServerAuthenticationProvider;
+import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
+import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
+import org.apache.zookeeper.server.quorum.ReadOnlyZooKeeperServer;
+import org.apache.zookeeper.server.util.JvmPauseMonitor;
+import org.apache.zookeeper.server.util.OSMXBean;
+import org.apache.zookeeper.server.util.QuotaMetricsUtils;
+import org.apache.zookeeper.server.util.RequestPathMetricsCollector;
+import org.apache.zookeeper.txn.CreateSessionTxn;
+import org.apache.zookeeper.txn.TxnDigest;
+import org.apache.zookeeper.txn.TxnHeader;
+import org.apache.zookeeper.util.ServiceUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * This class implements a simple standalone ZooKeeperServer. It sets up the
+ * following chain of RequestProcessors to process requests:
+ * PrepRequestProcessor -&amp;gt; SyncRequestProcessor -&amp;gt; FinalRequestProcessor
+ */
+public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
+
+    protected static final Logger LOG;
+    private static final RateLogger RATE_LOGGER;
+
+    public static final String GLOBAL_OUTSTANDING_LIMIT = &quot;zookeeper.globalOutstandingLimit&quot;;
+
+    public static final String ENABLE_EAGER_ACL_CHECK = &quot;zookeeper.enableEagerACLCheck&quot;;
+    public static final String SKIP_ACL = &quot;zookeeper.skipACL&quot;;
+    public static final String ENFORCE_QUOTA = &quot;zookeeper.enforceQuota&quot;;
+
+    // When enabled, will check ACL constraints appertained to the requests first,
+    // before sending the requests to the quorum.
+    static final boolean enableEagerACLCheck;
+
+    static final boolean skipACL;
+
+    public static final boolean enforceQuota;
+
+    public static final String SASL_SUPER_USER = &quot;zookeeper.superUser&quot;;
+
+    public static final String ALLOW_SASL_FAILED_CLIENTS = &quot;zookeeper.allowSaslFailedClients&quot;;
+    public static final String ZOOKEEPER_DIGEST_ENABLED = &quot;zookeeper.digest.enabled&quot;;
+    private static boolean digestEnabled;
+
+    // Add a enable/disable option for now, we should remove this one when
+    // this feature is confirmed to be stable
+    public static final String CLOSE_SESSION_TXN_ENABLED = &quot;zookeeper.closeSessionTxn.enabled&quot;;
+<span class="fc" id="L128">    private static boolean closeSessionTxnEnabled = true;</span>
+
+    static {
+<span class="fc" id="L131">        LOG = LoggerFactory.getLogger(ZooKeeperServer.class);</span>
+
+<span class="fc" id="L133">        RATE_LOGGER = new RateLogger(LOG);</span>
+
+<span class="fc" id="L135">        ZookeeperBanner.printBanner(LOG);</span>
+
+<span class="fc" id="L137">        Environment.logEnv(&quot;Server environment:&quot;, LOG);</span>
+
+<span class="fc" id="L139">        enableEagerACLCheck = Boolean.getBoolean(ENABLE_EAGER_ACL_CHECK);</span>
+<span class="fc" id="L140">        LOG.info(&quot;{} = {}&quot;, ENABLE_EAGER_ACL_CHECK, enableEagerACLCheck);</span>
+
+<span class="fc" id="L142">        skipACL = System.getProperty(SKIP_ACL, &quot;no&quot;).equals(&quot;yes&quot;);</span>
+<span class="pc bpc" id="L143" title="1 of 2 branches missed.">        if (skipACL) {</span>
+<span class="nc" id="L144">            LOG.info(&quot;{}==\&quot;yes\&quot;, ACL checks will be skipped&quot;, SKIP_ACL);</span>
+        }
+
+<span class="fc" id="L147">        enforceQuota = Boolean.parseBoolean(System.getProperty(ENFORCE_QUOTA, &quot;false&quot;));</span>
+<span class="pc bpc" id="L148" title="1 of 2 branches missed.">        if (enforceQuota) {</span>
+<span class="nc" id="L149">            LOG.info(&quot;{} = {}, Quota Enforce enables&quot;, ENFORCE_QUOTA, enforceQuota);</span>
+        }
+
+<span class="fc" id="L152">        digestEnabled = Boolean.parseBoolean(System.getProperty(ZOOKEEPER_DIGEST_ENABLED, &quot;true&quot;));</span>
+<span class="fc" id="L153">        LOG.info(&quot;{} = {}&quot;, ZOOKEEPER_DIGEST_ENABLED, digestEnabled);</span>
+
+<span class="fc" id="L155">        closeSessionTxnEnabled = Boolean.parseBoolean(</span>
+<span class="fc" id="L156">                System.getProperty(CLOSE_SESSION_TXN_ENABLED, &quot;true&quot;));</span>
+<span class="fc" id="L157">        LOG.info(&quot;{} = {}&quot;, CLOSE_SESSION_TXN_ENABLED, closeSessionTxnEnabled);</span>
+    }
+
+    public static boolean isCloseSessionTxnEnabled() {
+<span class="nc" id="L161">        return closeSessionTxnEnabled;</span>
+    }
+
+    public static void setCloseSessionTxnEnabled(boolean enabled) {
+<span class="nc" id="L165">        ZooKeeperServer.closeSessionTxnEnabled = enabled;</span>
+<span class="nc" id="L166">        LOG.info(&quot;Update {} to {}&quot;, CLOSE_SESSION_TXN_ENABLED,</span>
+<span class="nc" id="L167">                ZooKeeperServer.closeSessionTxnEnabled);</span>
+<span class="nc" id="L168">    }</span>
+
+    protected ZooKeeperServerBean jmxServerBean;
+    protected DataTreeBean jmxDataTreeBean;
+
+    public static final int DEFAULT_TICK_TIME = 3000;
+<span class="nc" id="L174">    protected int tickTime = DEFAULT_TICK_TIME;</span>
+    public static final int DEFAULT_THROTTLED_OP_WAIT_TIME = 0; // disabled
+<span class="fc" id="L176">    protected static volatile int throttledOpWaitTime =</span>
+<span class="fc" id="L177">        Integer.getInteger(&quot;zookeeper.throttled_op_wait_time&quot;, DEFAULT_THROTTLED_OP_WAIT_TIME);</span>
+    /** value of -1 indicates unset, use default */
+<span class="nc" id="L179">    protected int minSessionTimeout = -1;</span>
+    /** value of -1 indicates unset, use default */
+<span class="nc" id="L181">    protected int maxSessionTimeout = -1;</span>
+    /** Socket listen backlog. Value of -1 indicates unset */
+<span class="nc" id="L183">    protected int listenBacklog = -1;</span>
+    protected SessionTracker sessionTracker;
+<span class="nc" id="L185">    private FileTxnSnapLog txnLogFactory = null;</span>
+    private ZKDatabase zkDb;
+    private ResponseCache readResponseCache;
+    private ResponseCache getChildrenResponseCache;
+<span class="nc" id="L189">    private final AtomicLong hzxid = new AtomicLong(0);</span>
+<span class="fc" id="L190">    public static final Exception ok = new Exception(&quot;No prob&quot;);</span>
+    protected RequestProcessor firstProcessor;
+    protected JvmPauseMonitor jvmPauseMonitor;
+<span class="nc" id="L193">    protected volatile State state = State.INITIAL;</span>
+<span class="nc" id="L194">    private boolean isResponseCachingEnabled = true;</span>
+    /* contains the configuration file content read at startup */
+    protected String initialConfig;
+    protected boolean reconfigEnabled;
+    private final RequestPathMetricsCollector requestPathMetricsCollector;
+    private static final int DEFAULT_SNAP_COUNT = 100000;
+    private static final int DEFAULT_GLOBAL_OUTSTANDING_LIMIT = 1000;
+
+<span class="nc" id="L202">    private boolean localSessionEnabled = false;</span>
+<span class="nc" id="L203">    protected enum State {</span>
+<span class="nc" id="L204">        INITIAL,</span>
+<span class="nc" id="L205">        RUNNING,</span>
+<span class="nc" id="L206">        SHUTDOWN,</span>
+<span class="nc" id="L207">        ERROR</span>
+    }
+
+    /**
+     * This is the secret that we use to generate passwords. For the moment,
+     * it's more of a checksum that's used in reconnection, which carries no
+     * security weight, and is treated internally as if it carries no
+     * security weight.
+     */
+    private static final long superSecret = 0XB3415C00L;
+
+<span class="nc" id="L218">    private final AtomicInteger requestsInProcess = new AtomicInteger(0);</span>
+<span class="nc" id="L219">    final Deque&lt;ChangeRecord&gt; outstandingChanges = new ArrayDeque&lt;&gt;();</span>
+    // this data structure must be accessed under the outstandingChanges lock
+<span class="nc" id="L221">    final Map&lt;String, ChangeRecord&gt; outstandingChangesForPath = new HashMap&lt;String, ChangeRecord&gt;();</span>
+
+    protected ServerCnxnFactory serverCnxnFactory;
+    protected ServerCnxnFactory secureServerCnxnFactory;
+
+    private final ServerStats serverStats;
+    private final ZooKeeperServerListener listener;
+    private ZooKeeperServerShutdownHandler zkShutdownHandler;
+<span class="nc" id="L229">    private volatile int createSessionTrackerServerId = 1;</span>
+
+    private static final String FLUSH_DELAY = &quot;zookeeper.flushDelay&quot;;
+    private static volatile long flushDelay;
+    private static final String MAX_WRITE_QUEUE_POLL_SIZE = &quot;zookeeper.maxWriteQueuePollTime&quot;;
+    private static volatile long maxWriteQueuePollTime;
+    private static final String MAX_BATCH_SIZE = &quot;zookeeper.maxBatchSize&quot;;
+    private static volatile int maxBatchSize;
+
+    /**
+     * Starting size of read and write ByteArroyOuputBuffers. Default is 32 bytes.
+     * Flag not used for small transfers like connectResponses.
+     */
+    public static final String INT_BUFFER_STARTING_SIZE_BYTES = &quot;zookeeper.intBufferStartingSizeBytes&quot;;
+    public static final int DEFAULT_STARTING_BUFFER_SIZE = 1024;
+    public static final int intBufferStartingSizeBytes;
+
+    public static final String GET_DATA_RESPONSE_CACHE_SIZE = &quot;zookeeper.maxResponseCacheSize&quot;;
+    public static final String GET_CHILDREN_RESPONSE_CACHE_SIZE = &quot;zookeeper.maxGetChildrenResponseCacheSize&quot;;
+
+    static {
+<span class="fc" id="L250">        long configuredFlushDelay = Long.getLong(FLUSH_DELAY, 0);</span>
+<span class="fc" id="L251">        setFlushDelay(configuredFlushDelay);</span>
+<span class="fc" id="L252">        setMaxWriteQueuePollTime(Long.getLong(MAX_WRITE_QUEUE_POLL_SIZE, configuredFlushDelay / 3));</span>
+<span class="fc" id="L253">        setMaxBatchSize(Integer.getInteger(MAX_BATCH_SIZE, 1000));</span>
+
+<span class="fc" id="L255">        intBufferStartingSizeBytes = Integer.getInteger(INT_BUFFER_STARTING_SIZE_BYTES, DEFAULT_STARTING_BUFFER_SIZE);</span>
+
+<span class="pc bpc" id="L257" title="1 of 2 branches missed.">        if (intBufferStartingSizeBytes &lt; 32) {</span>
+<span class="nc" id="L258">            String msg = &quot;Buffer starting size (&quot; + intBufferStartingSizeBytes + &quot;) must be greater than or equal to 32. &quot;</span>
+                         + &quot;Configure with \&quot;-Dzookeeper.intBufferStartingSizeBytes=&lt;size&gt;\&quot; &quot;;
+<span class="nc" id="L260">            LOG.error(msg);</span>
+<span class="nc" id="L261">            throw new IllegalArgumentException(msg);</span>
+        }
+
+<span class="fc" id="L264">        LOG.info(&quot;{} = {}&quot;, INT_BUFFER_STARTING_SIZE_BYTES, intBufferStartingSizeBytes);</span>
+<span class="fc" id="L265">    }</span>
+
+    // Connection throttling
+<span class="nc" id="L268">    private BlueThrottle connThrottle = new BlueThrottle();</span>
+
+    @SuppressFBWarnings(value = &quot;IS2_INCONSISTENT_SYNC&quot;, justification =
+        &quot;Internally the throttler has a BlockingQueue so &quot;
+        + &quot;once the throttler is created and started, it is thread-safe&quot;)
+    private RequestThrottler requestThrottler;
+    public static final String SNAP_COUNT = &quot;zookeeper.snapCount&quot;;
+
+    /**
+     * This setting sets a limit on the total number of large requests that
+     * can be inflight and is designed to prevent ZooKeeper from accepting
+     * too many large requests such that the JVM runs out of usable heap and
+     * ultimately crashes.
+     *
+     * The limit is enforced by the {@link checkRequestSize(int, boolean)}
+     * method which is called by the connection layer ({@link NIOServerCnxn},
+     * {@link NettyServerCnxn}) before allocating a byte buffer and pulling
+     * data off the TCP socket. The limit is then checked again by the
+     * ZooKeeper server in {@link processPacket(ServerCnxn, ByteBuffer)} which
+     * also atomically updates {@link currentLargeRequestBytes}. The request is
+     * then marked as a large request, with the request size stored in the Request
+     * object so that it can later be decremented from {@link currentLargeRequestsBytes}.
+     *
+     * When a request is completed or dropped, the relevant code path calls the
+     * {@link requestFinished(Request)} method which performs the decrement if
+     * needed.
+     */
+<span class="nc" id="L295">    private volatile int largeRequestMaxBytes = 100 * 1024 * 1024;</span>
+
+    /**
+     * The size threshold after which a request is considered a large request
+     * and is checked against the large request byte limit.
+     */
+<span class="nc" id="L301">    private volatile int largeRequestThreshold = -1;</span>
+
+<span class="nc" id="L303">    private final AtomicInteger currentLargeRequestBytes = new AtomicInteger(0);</span>
+
+    private AuthenticationHelper authHelper;
+
+    void removeCnxn(ServerCnxn cnxn) {
+<span class="nc" id="L308">        zkDb.removeCnxn(cnxn);</span>
+<span class="nc" id="L309">    }</span>
+
+    /**
+     * Creates a ZooKeeperServer instance. Nothing is setup, use the setX
+     * methods to prepare the instance (eg datadir, datalogdir, ticktime,
+     * builder, etc...)
+     *
+     */
+<span class="nc" id="L317">    public ZooKeeperServer() {</span>
+<span class="nc" id="L318">        listener = new ZooKeeperServerListenerImpl(this);</span>
+<span class="nc" id="L319">        serverStats = new ServerStats(this);</span>
+<span class="nc" id="L320">        this.requestPathMetricsCollector = new RequestPathMetricsCollector();</span>
+<span class="nc" id="L321">        this.authHelper = new AuthenticationHelper();</span>
+<span class="nc" id="L322">    }</span>
+
+    /**
+     * Keeping this constructor for backward compatibility
+     */
+    public ZooKeeperServer(FileTxnSnapLog txnLogFactory, int tickTime, int minSessionTimeout, int maxSessionTimeout, int clientPortListenBacklog, ZKDatabase zkDb, String initialConfig) {
+<span class="nc" id="L328">        this(txnLogFactory, tickTime, minSessionTimeout, maxSessionTimeout, clientPortListenBacklog, zkDb, initialConfig, QuorumPeerConfig.isReconfigEnabled());</span>
+<span class="nc" id="L329">    }</span>
+
+    /**
+     *  * Creates a ZooKeeperServer instance. It sets everything up, but doesn't
+     * actually start listening for clients until run() is invoked.
+     *
+     */
+<span class="nc" id="L336">    public ZooKeeperServer(FileTxnSnapLog txnLogFactory, int tickTime, int minSessionTimeout, int maxSessionTimeout, int clientPortListenBacklog, ZKDatabase zkDb, String initialConfig, boolean reconfigEnabled) {</span>
+<span class="nc" id="L337">        serverStats = new ServerStats(this);</span>
+<span class="nc" id="L338">        this.txnLogFactory = txnLogFactory;</span>
+<span class="nc" id="L339">        this.txnLogFactory.setServerStats(this.serverStats);</span>
+<span class="nc" id="L340">        this.zkDb = zkDb;</span>
+<span class="nc" id="L341">        this.tickTime = tickTime;</span>
+<span class="nc" id="L342">        setMinSessionTimeout(minSessionTimeout);</span>
+<span class="nc" id="L343">        setMaxSessionTimeout(maxSessionTimeout);</span>
+<span class="nc" id="L344">        this.listenBacklog = clientPortListenBacklog;</span>
+<span class="nc" id="L345">        this.reconfigEnabled = reconfigEnabled;</span>
+
+<span class="nc" id="L347">        listener = new ZooKeeperServerListenerImpl(this);</span>
+
+<span class="nc" id="L349">        readResponseCache = new ResponseCache(Integer.getInteger(</span>
+            GET_DATA_RESPONSE_CACHE_SIZE,
+            ResponseCache.DEFAULT_RESPONSE_CACHE_SIZE), &quot;getData&quot;);
+
+<span class="nc" id="L353">        getChildrenResponseCache = new ResponseCache(Integer.getInteger(</span>
+            GET_CHILDREN_RESPONSE_CACHE_SIZE,
+            ResponseCache.DEFAULT_RESPONSE_CACHE_SIZE), &quot;getChildren&quot;);
+
+<span class="nc" id="L357">        this.initialConfig = initialConfig;</span>
+
+<span class="nc" id="L359">        this.requestPathMetricsCollector = new RequestPathMetricsCollector();</span>
+
+<span class="nc" id="L361">        this.initLargeRequestThrottlingSettings();</span>
+
+<span class="nc" id="L363">        this.authHelper = new AuthenticationHelper();</span>
+
+<span class="nc" id="L365">        LOG.info(</span>
+            &quot;Created server with&quot;
+                + &quot; tickTime {} ms&quot;
+                + &quot; minSessionTimeout {} ms&quot;
+                + &quot; maxSessionTimeout {} ms&quot;
+                + &quot; clientPortListenBacklog {}&quot;
+                + &quot; datadir {}&quot;
+                + &quot; snapdir {}&quot;,
+<span class="nc" id="L373">            tickTime,</span>
+<span class="nc" id="L374">            getMinSessionTimeout(),</span>
+<span class="nc" id="L375">            getMaxSessionTimeout(),</span>
+<span class="nc" id="L376">            getClientPortListenBacklog(),</span>
+<span class="nc" id="L377">            txnLogFactory.getDataDir(),</span>
+<span class="nc" id="L378">            txnLogFactory.getSnapDir());</span>
+<span class="nc" id="L379">    }</span>
+
+    public String getInitialConfig() {
+<span class="nc" id="L382">        return initialConfig;</span>
+    }
+
+    /**
+     * Adds JvmPauseMonitor and calls
+     * {@link #ZooKeeperServer(FileTxnSnapLog, int, int, int, int, ZKDatabase, String)}
+     *
+     */
+    public ZooKeeperServer(JvmPauseMonitor jvmPauseMonitor, FileTxnSnapLog txnLogFactory, int tickTime, int minSessionTimeout, int maxSessionTimeout, int clientPortListenBacklog, ZKDatabase zkDb, String initialConfig) {
+<span class="nc" id="L391">        this(txnLogFactory, tickTime, minSessionTimeout, maxSessionTimeout, clientPortListenBacklog, zkDb, initialConfig, QuorumPeerConfig.isReconfigEnabled());</span>
+<span class="nc" id="L392">        this.jvmPauseMonitor = jvmPauseMonitor;</span>
+<span class="nc bnc" id="L393" title="All 2 branches missed.">        if (jvmPauseMonitor != null) {</span>
+<span class="nc" id="L394">            LOG.info(&quot;Added JvmPauseMonitor to server&quot;);</span>
+        }
+<span class="nc" id="L396">    }</span>
+
+    /**
+     * creates a zookeeperserver instance.
+     * @param txnLogFactory the file transaction snapshot logging class
+     * @param tickTime the ticktime for the server
+     * @throws IOException
+     */
+    public ZooKeeperServer(FileTxnSnapLog txnLogFactory, int tickTime, String initialConfig) {
+<span class="nc" id="L405">        this(txnLogFactory, tickTime, -1, -1, -1, new ZKDatabase(txnLogFactory), initialConfig, QuorumPeerConfig.isReconfigEnabled());</span>
+<span class="nc" id="L406">    }</span>
+
+    public ServerStats serverStats() {
+<span class="nc" id="L409">        return serverStats;</span>
+    }
+
+    public RequestPathMetricsCollector getRequestPathMetricsCollector() {
+<span class="nc" id="L413">        return requestPathMetricsCollector;</span>
+    }
+
+    public BlueThrottle connThrottle() {
+<span class="nc" id="L417">        return connThrottle;</span>
+    }
+
+    public void dumpConf(PrintWriter pwriter) {
+<span class="nc" id="L421">        pwriter.print(&quot;clientPort=&quot;);</span>
+<span class="nc" id="L422">        pwriter.println(getClientPort());</span>
+<span class="nc" id="L423">        pwriter.print(&quot;secureClientPort=&quot;);</span>
+<span class="nc" id="L424">        pwriter.println(getSecureClientPort());</span>
+<span class="nc" id="L425">        pwriter.print(&quot;dataDir=&quot;);</span>
+<span class="nc" id="L426">        pwriter.println(zkDb.snapLog.getSnapDir().getAbsolutePath());</span>
+<span class="nc" id="L427">        pwriter.print(&quot;dataDirSize=&quot;);</span>
+<span class="nc" id="L428">        pwriter.println(getDataDirSize());</span>
+<span class="nc" id="L429">        pwriter.print(&quot;dataLogDir=&quot;);</span>
+<span class="nc" id="L430">        pwriter.println(zkDb.snapLog.getDataDir().getAbsolutePath());</span>
+<span class="nc" id="L431">        pwriter.print(&quot;dataLogSize=&quot;);</span>
+<span class="nc" id="L432">        pwriter.println(getLogDirSize());</span>
+<span class="nc" id="L433">        pwriter.print(&quot;tickTime=&quot;);</span>
+<span class="nc" id="L434">        pwriter.println(getTickTime());</span>
+<span class="nc" id="L435">        pwriter.print(&quot;maxClientCnxns=&quot;);</span>
+<span class="nc" id="L436">        pwriter.println(getMaxClientCnxnsPerHost());</span>
+<span class="nc" id="L437">        pwriter.print(&quot;minSessionTimeout=&quot;);</span>
+<span class="nc" id="L438">        pwriter.println(getMinSessionTimeout());</span>
+<span class="nc" id="L439">        pwriter.print(&quot;maxSessionTimeout=&quot;);</span>
+<span class="nc" id="L440">        pwriter.println(getMaxSessionTimeout());</span>
+<span class="nc" id="L441">        pwriter.print(&quot;clientPortListenBacklog=&quot;);</span>
+<span class="nc" id="L442">        pwriter.println(getClientPortListenBacklog());</span>
+
+<span class="nc" id="L444">        pwriter.print(&quot;serverId=&quot;);</span>
+<span class="nc" id="L445">        pwriter.println(getServerId());</span>
+<span class="nc" id="L446">    }</span>
+
+    public ZooKeeperServerConf getConf() {
+<span class="nc" id="L449">        return new ZooKeeperServerConf(</span>
+<span class="nc" id="L450">            getClientPort(),</span>
+<span class="nc" id="L451">            zkDb.snapLog.getSnapDir().getAbsolutePath(),</span>
+<span class="nc" id="L452">            zkDb.snapLog.getDataDir().getAbsolutePath(),</span>
+<span class="nc" id="L453">            getTickTime(),</span>
+<span class="nc" id="L454">            getMaxClientCnxnsPerHost(),</span>
+<span class="nc" id="L455">            getMinSessionTimeout(),</span>
+<span class="nc" id="L456">            getMaxSessionTimeout(),</span>
+<span class="nc" id="L457">            getServerId(),</span>
+<span class="nc" id="L458">            getClientPortListenBacklog());</span>
+    }
+
+    /**
+     * This constructor is for backward compatibility with the existing unit
+     * test code.
+     * It defaults to FileLogProvider persistence provider.
+     */
+    public ZooKeeperServer(File snapDir, File logDir, int tickTime) throws IOException {
+<span class="nc" id="L467">        this(new FileTxnSnapLog(snapDir, logDir), tickTime, &quot;&quot;);</span>
+<span class="nc" id="L468">    }</span>
+
+    /**
+     * Default constructor, relies on the config for its argument values
+     *
+     * @throws IOException
+     */
+    public ZooKeeperServer(FileTxnSnapLog txnLogFactory) throws IOException {
+<span class="nc" id="L476">        this(txnLogFactory, DEFAULT_TICK_TIME, -1, -1, -1, new ZKDatabase(txnLogFactory), &quot;&quot;, QuorumPeerConfig.isReconfigEnabled());</span>
+<span class="nc" id="L477">    }</span>
+
+    /**
+     * get the zookeeper database for this server
+     * @return the zookeeper database for this server
+     */
+    public ZKDatabase getZKDatabase() {
+<span class="nc" id="L484">        return this.zkDb;</span>
+    }
+
+    /**
+     * set the zkdatabase for this zookeeper server
+     * @param zkDb
+     */
+    public void setZKDatabase(ZKDatabase zkDb) {
+<span class="nc" id="L492">        this.zkDb = zkDb;</span>
+<span class="nc" id="L493">    }</span>
+
+    /**
+     *  Restore sessions and data
+     */
+    public void loadData() throws IOException, InterruptedException {
+        /*
+         * When a new leader starts executing Leader#lead, it
+         * invokes this method. The database, however, has been
+         * initialized before running leader election so that
+         * the server could pick its zxid for its initial vote.
+         * It does it by invoking QuorumPeer#getLastLoggedZxid.
+         * Consequently, we don't need to initialize it once more
+         * and avoid the penalty of loading it a second time. Not
+         * reloading it is particularly important for applications
+         * that host a large database.
+         *
+         * The following if block checks whether the database has
+         * been initialized or not. Note that this method is
+         * invoked by at least one other method:
+         * ZooKeeperServer#startdata.
+         *
+         * See ZOOKEEPER-1642 for more detail.
+         */
+<span class="nc bnc" id="L517" title="All 2 branches missed.">        if (zkDb.isInitialized()) {</span>
+<span class="nc" id="L518">            setZxid(zkDb.getDataTreeLastProcessedZxid());</span>
+        } else {
+<span class="nc" id="L520">            setZxid(zkDb.loadDataBase());</span>
+        }
+
+        // Clean up dead sessions
+<span class="nc" id="L524">        zkDb.getSessions().stream()</span>
+<span class="nc bnc" id="L525" title="All 2 branches missed.">                        .filter(session -&gt; zkDb.getSessionWithTimeOuts().get(session) == null)</span>
+<span class="nc" id="L526">                        .forEach(session -&gt; killSession(session, zkDb.getDataTreeLastProcessedZxid()));</span>
+
+        // Make a clean snapshot
+<span class="nc" id="L529">        takeSnapshot();</span>
+<span class="nc" id="L530">    }</span>
+
+    public void takeSnapshot() {
+<span class="nc" id="L533">        takeSnapshot(false);</span>
+<span class="nc" id="L534">    }</span>
+
+    public void takeSnapshot(boolean syncSnap) {
+<span class="nc" id="L537">        long start = Time.currentElapsedTime();</span>
+        try {
+<span class="nc" id="L539">            txnLogFactory.save(zkDb.getDataTree(), zkDb.getSessionWithTimeOuts(), syncSnap);</span>
+<span class="nc" id="L540">        } catch (IOException e) {</span>
+<span class="nc" id="L541">            LOG.error(&quot;Severe unrecoverable error, exiting&quot;, e);</span>
+            // This is a severe error that we cannot recover from,
+            // so we need to exit
+<span class="nc" id="L544">            ServiceUtils.requestSystemExit(ExitCode.TXNLOG_ERROR_TAKING_SNAPSHOT.getValue());</span>
+<span class="nc" id="L545">        }</span>
+<span class="nc" id="L546">        long elapsed = Time.currentElapsedTime() - start;</span>
+<span class="nc" id="L547">        LOG.info(&quot;Snapshot taken in {} ms&quot;, elapsed);</span>
+<span class="nc" id="L548">        ServerMetrics.getMetrics().SNAPSHOT_TIME.add(elapsed);</span>
+<span class="nc" id="L549">    }</span>
+
+    public boolean shouldForceWriteInitialSnapshotAfterLeaderElection() {
+<span class="nc" id="L552">        return txnLogFactory.shouldForceWriteInitialSnapshotAfterLeaderElection();</span>
+    }
+
+    @Override
+    public long getDataDirSize() {
+<span class="nc bnc" id="L557" title="All 2 branches missed.">        if (zkDb == null) {</span>
+<span class="nc" id="L558">            return 0L;</span>
+        }
+<span class="nc" id="L560">        File path = zkDb.snapLog.getDataDir();</span>
+<span class="nc" id="L561">        return getDirSize(path);</span>
+    }
+
+    @Override
+    public long getLogDirSize() {
+<span class="nc bnc" id="L566" title="All 2 branches missed.">        if (zkDb == null) {</span>
+<span class="nc" id="L567">            return 0L;</span>
+        }
+<span class="nc" id="L569">        File path = zkDb.snapLog.getSnapDir();</span>
+<span class="nc" id="L570">        return getDirSize(path);</span>
+    }
+
+    private long getDirSize(File file) {
+<span class="nc" id="L574">        long size = 0L;</span>
+<span class="nc bnc" id="L575" title="All 2 branches missed.">        if (file.isDirectory()) {</span>
+<span class="nc" id="L576">            File[] files = file.listFiles();</span>
+<span class="nc bnc" id="L577" title="All 2 branches missed.">            if (files != null) {</span>
+<span class="nc bnc" id="L578" title="All 2 branches missed.">                for (File f : files) {</span>
+<span class="nc" id="L579">                    size += getDirSize(f);</span>
+                }
+            }
+<span class="nc" id="L582">        } else {</span>
+<span class="nc" id="L583">            size = file.length();</span>
+        }
+<span class="nc" id="L585">        return size;</span>
+    }
+
+    public long getZxid() {
+<span class="nc" id="L589">        return hzxid.get();</span>
+    }
+
+    public SessionTracker getSessionTracker() {
+<span class="nc" id="L593">        return sessionTracker;</span>
+    }
+
+    long getNextZxid() {
+<span class="nc" id="L597">        return hzxid.incrementAndGet();</span>
+    }
+
+    public void setZxid(long zxid) {
+<span class="nc" id="L601">        hzxid.set(zxid);</span>
+<span class="nc" id="L602">    }</span>
+
+    private void close(long sessionId) {
+<span class="nc" id="L605">        Request si = new Request(null, sessionId, 0, OpCode.closeSession, null, null);</span>
+<span class="nc" id="L606">        submitRequest(si);</span>
+<span class="nc" id="L607">    }</span>
+
+    public void closeSession(long sessionId) {
+<span class="nc" id="L610">        LOG.info(&quot;Closing session 0x{}&quot;, Long.toHexString(sessionId));</span>
+
+        // we do not want to wait for a session close. send it as soon as we
+        // detect it!
+<span class="nc" id="L614">        close(sessionId);</span>
+<span class="nc" id="L615">    }</span>
+
+    protected void killSession(long sessionId, long zxid) {
+<span class="nc" id="L618">        zkDb.killSession(sessionId, zxid);</span>
+<span class="nc bnc" id="L619" title="All 2 branches missed.">        if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L620">            ZooTrace.logTraceMessage(</span>
+                LOG,
+                ZooTrace.SESSION_TRACE_MASK,
+<span class="nc" id="L623">                &quot;ZooKeeperServer --- killSession: 0x&quot; + Long.toHexString(sessionId));</span>
+        }
+<span class="nc bnc" id="L625" title="All 2 branches missed.">        if (sessionTracker != null) {</span>
+<span class="nc" id="L626">            sessionTracker.removeSession(sessionId);</span>
+        }
+<span class="nc" id="L628">    }</span>
+
+    public void expire(Session session) {
+<span class="nc" id="L631">        long sessionId = session.getSessionId();</span>
+<span class="nc" id="L632">        LOG.info(</span>
+            &quot;Expiring session 0x{}, timeout of {}ms exceeded&quot;,
+<span class="nc" id="L634">            Long.toHexString(sessionId),</span>
+<span class="nc" id="L635">            session.getTimeout());</span>
+<span class="nc" id="L636">        close(sessionId);</span>
+<span class="nc" id="L637">    }</span>
+
+    public void expire(long sessionId) {
+<span class="nc" id="L640">        LOG.info(&quot;forcibly expiring session 0x{}&quot;, Long.toHexString(sessionId));</span>
+
+<span class="nc" id="L642">        close(sessionId);</span>
+<span class="nc" id="L643">    }</span>
+
+    public static class MissingSessionException extends IOException {
+
+        private static final long serialVersionUID = 7467414635467261007L;
+
+        public MissingSessionException(String msg) {
+<span class="nc" id="L650">            super(msg);</span>
+<span class="nc" id="L651">        }</span>
+
+    }
+
+    void touch(ServerCnxn cnxn) throws MissingSessionException {
+<span class="nc bnc" id="L656" title="All 2 branches missed.">        if (cnxn == null) {</span>
+<span class="nc" id="L657">            return;</span>
+        }
+<span class="nc" id="L659">        long id = cnxn.getSessionId();</span>
+<span class="nc" id="L660">        int to = cnxn.getSessionTimeout();</span>
+<span class="nc bnc" id="L661" title="All 2 branches missed.">        if (!sessionTracker.touchSession(id, to)) {</span>
+<span class="nc" id="L662">            throw new MissingSessionException(&quot;No session with sessionid 0x&quot;</span>
+<span class="nc" id="L663">                                              + Long.toHexString(id)</span>
+                                              + &quot; exists, probably expired and removed&quot;);
+        }
+<span class="nc" id="L666">    }</span>
+
+    protected void registerJMX() {
+        // register with JMX
+        try {
+<span class="nc" id="L671">            jmxServerBean = new ZooKeeperServerBean(this);</span>
+<span class="nc" id="L672">            MBeanRegistry.getInstance().register(jmxServerBean, null);</span>
+
+            try {
+<span class="nc" id="L675">                jmxDataTreeBean = new DataTreeBean(zkDb.getDataTree());</span>
+<span class="nc" id="L676">                MBeanRegistry.getInstance().register(jmxDataTreeBean, jmxServerBean);</span>
+<span class="nc" id="L677">            } catch (Exception e) {</span>
+<span class="nc" id="L678">                LOG.warn(&quot;Failed to register with JMX&quot;, e);</span>
+<span class="nc" id="L679">                jmxDataTreeBean = null;</span>
+<span class="nc" id="L680">            }</span>
+<span class="nc" id="L681">        } catch (Exception e) {</span>
+<span class="nc" id="L682">            LOG.warn(&quot;Failed to register with JMX&quot;, e);</span>
+<span class="nc" id="L683">            jmxServerBean = null;</span>
+<span class="nc" id="L684">        }</span>
+<span class="nc" id="L685">    }</span>
+
+    public void startdata() throws IOException, InterruptedException {
+        //check to see if zkDb is not null
+<span class="nc bnc" id="L689" title="All 2 branches missed.">        if (zkDb == null) {</span>
+<span class="nc" id="L690">            zkDb = new ZKDatabase(this.txnLogFactory);</span>
+        }
+<span class="nc bnc" id="L692" title="All 2 branches missed.">        if (!zkDb.isInitialized()) {</span>
+<span class="nc" id="L693">            loadData();</span>
+        }
+<span class="nc" id="L695">    }</span>
+
+    public synchronized void startup() {
+<span class="nc" id="L698">        startupWithServerState(State.RUNNING);</span>
+<span class="nc" id="L699">    }</span>
+
+    public synchronized void startupWithoutServing() {
+<span class="nc" id="L702">        startupWithServerState(State.INITIAL);</span>
+<span class="nc" id="L703">    }</span>
+
+    public synchronized void startServing() {
+<span class="nc" id="L706">        setState(State.RUNNING);</span>
+<span class="nc" id="L707">        notifyAll();</span>
+<span class="nc" id="L708">    }</span>
+
+    private void startupWithServerState(State state) {
+<span class="nc bnc" id="L711" title="All 2 branches missed.">        if (sessionTracker == null) {</span>
+<span class="nc" id="L712">            createSessionTracker();</span>
+        }
+<span class="nc" id="L714">        startSessionTracker();</span>
+<span class="nc" id="L715">        setupRequestProcessors();</span>
+
+<span class="nc" id="L717">        startRequestThrottler();</span>
+
+<span class="nc" id="L719">        registerJMX();</span>
+
+<span class="nc" id="L721">        startJvmPauseMonitor();</span>
+
+<span class="nc" id="L723">        registerMetrics();</span>
+
+<span class="nc" id="L725">        setState(state);</span>
+
+<span class="nc" id="L727">        requestPathMetricsCollector.start();</span>
+
+<span class="nc" id="L729">        localSessionEnabled = sessionTracker.isLocalSessionsEnabled();</span>
+
+<span class="nc" id="L731">        notifyAll();</span>
+<span class="nc" id="L732">    }</span>
+
+    protected void startJvmPauseMonitor() {
+<span class="nc bnc" id="L735" title="All 2 branches missed.">        if (this.jvmPauseMonitor != null) {</span>
+<span class="nc" id="L736">            this.jvmPauseMonitor.serviceStart();</span>
+        }
+<span class="nc" id="L738">    }</span>
+
+    protected void startRequestThrottler() {
+<span class="nc" id="L741">        requestThrottler = new RequestThrottler(this);</span>
+<span class="nc" id="L742">        requestThrottler.start();</span>
+
+<span class="nc" id="L744">    }</span>
+
+    protected void setupRequestProcessors() {
+<span class="nc" id="L747">        RequestProcessor finalProcessor = new FinalRequestProcessor(this);</span>
+<span class="nc" id="L748">        RequestProcessor syncProcessor = new SyncRequestProcessor(this, finalProcessor);</span>
+<span class="nc" id="L749">        ((SyncRequestProcessor) syncProcessor).start();</span>
+<span class="nc" id="L750">        firstProcessor = new PrepRequestProcessor(this, syncProcessor);</span>
+<span class="nc" id="L751">        ((PrepRequestProcessor) firstProcessor).start();</span>
+<span class="nc" id="L752">    }</span>
+
+    public ZooKeeperServerListener getZooKeeperServerListener() {
+<span class="nc" id="L755">        return listener;</span>
+    }
+
+    /**
+     * Change the server ID used by {@link #createSessionTracker()}. Must be called prior to
+     * {@link #startup()} being called
+     *
+     * @param newId ID to use
+     */
+    public void setCreateSessionTrackerServerId(int newId) {
+<span class="nc" id="L765">        createSessionTrackerServerId = newId;</span>
+<span class="nc" id="L766">    }</span>
+
+    protected void createSessionTracker() {
+<span class="nc" id="L769">        sessionTracker = new SessionTrackerImpl(this, zkDb.getSessionWithTimeOuts(), tickTime, createSessionTrackerServerId, getZooKeeperServerListener());</span>
+<span class="nc" id="L770">    }</span>
+
+    protected void startSessionTracker() {
+<span class="nc" id="L773">        ((SessionTrackerImpl) sessionTracker).start();</span>
+<span class="nc" id="L774">    }</span>
+
+    /**
+     * Sets the state of ZooKeeper server. After changing the state, it notifies
+     * the server state change to a registered shutdown handler, if any.
+     * &lt;p&gt;
+     * The following are the server state transitions:
+     * &lt;ul&gt;&lt;li&gt;During startup the server will be in the INITIAL state.&lt;/li&gt;
+     * &lt;li&gt;After successfully starting, the server sets the state to RUNNING.
+     * &lt;/li&gt;
+     * &lt;li&gt;The server transitions to the ERROR state if it hits an internal
+     * error. {@link ZooKeeperServerListenerImpl} notifies any critical resource
+     * error events, e.g., SyncRequestProcessor not being able to write a txn to
+     * disk.&lt;/li&gt;
+     * &lt;li&gt;During shutdown the server sets the state to SHUTDOWN, which
+     * corresponds to the server not running.&lt;/li&gt;&lt;/ul&gt;
+     *
+     * @param state new server state.
+     */
+    protected void setState(State state) {
+<span class="nc" id="L794">        this.state = state;</span>
+        // Notify server state changes to the registered shutdown handler, if any.
+<span class="nc bnc" id="L796" title="All 2 branches missed.">        if (zkShutdownHandler != null) {</span>
+<span class="nc" id="L797">            zkShutdownHandler.handle(state);</span>
+        } else {
+<span class="nc" id="L799">            LOG.debug(</span>
+                &quot;ZKShutdownHandler is not registered, so ZooKeeper server&quot;
+                    + &quot; won't take any action on ERROR or SHUTDOWN server state changes&quot;);
+        }
+<span class="nc" id="L803">    }</span>
+
+    /**
+     * This can be used while shutting down the server to see whether the server
+     * is already shutdown or not.
+     *
+     * @return true if the server is running or server hits an error, false
+     *         otherwise.
+     */
+    protected boolean canShutdown() {
+<span class="nc bnc" id="L813" title="All 4 branches missed.">        return state == State.RUNNING || state == State.ERROR;</span>
+    }
+
+    /**
+     * @return true if the server is running, false otherwise.
+     */
+    public boolean isRunning() {
+<span class="nc bnc" id="L820" title="All 2 branches missed.">        return state == State.RUNNING;</span>
+    }
+
+    public void shutdown() {
+<span class="nc" id="L824">        shutdown(false);</span>
+<span class="nc" id="L825">    }</span>
+
+    /**
+     * Shut down the server instance
+     * @param fullyShutDown true if another server using the same database will not replace this one in the same process
+     */
+    public synchronized void shutdown(boolean fullyShutDown) {
+<span class="nc bnc" id="L832" title="All 2 branches missed.">        if (!canShutdown()) {</span>
+<span class="nc bnc" id="L833" title="All 4 branches missed.">            if (fullyShutDown &amp;&amp; zkDb != null) {</span>
+<span class="nc" id="L834">                zkDb.clear();</span>
+            }
+<span class="nc" id="L836">            LOG.debug(&quot;ZooKeeper server is not running, so not proceeding to shutdown!&quot;);</span>
+<span class="nc" id="L837">            return;</span>
+        }
+<span class="nc" id="L839">        LOG.info(&quot;shutting down&quot;);</span>
+
+        // new RuntimeException(&quot;Calling shutdown&quot;).printStackTrace();
+<span class="nc" id="L842">        setState(State.SHUTDOWN);</span>
+
+        // unregister all metrics that are keeping a strong reference to this object
+        // subclasses will do their specific clean up
+<span class="nc" id="L846">        unregisterMetrics();</span>
+
+<span class="nc bnc" id="L848" title="All 2 branches missed.">        if (requestThrottler != null) {</span>
+<span class="nc" id="L849">            requestThrottler.shutdown();</span>
+        }
+
+        // Since sessionTracker and syncThreads poll we just have to
+        // set running to false and they will detect it during the poll
+        // interval.
+<span class="nc bnc" id="L855" title="All 2 branches missed.">        if (sessionTracker != null) {</span>
+<span class="nc" id="L856">            sessionTracker.shutdown();</span>
+        }
+<span class="nc bnc" id="L858" title="All 2 branches missed.">        if (firstProcessor != null) {</span>
+<span class="nc" id="L859">            firstProcessor.shutdown();</span>
+        }
+<span class="nc bnc" id="L861" title="All 2 branches missed.">        if (jvmPauseMonitor != null) {</span>
+<span class="nc" id="L862">            jvmPauseMonitor.serviceStop();</span>
+        }
+
+<span class="nc bnc" id="L865" title="All 2 branches missed.">        if (zkDb != null) {</span>
+<span class="nc bnc" id="L866" title="All 2 branches missed.">            if (fullyShutDown) {</span>
+<span class="nc" id="L867">                zkDb.clear();</span>
+            } else {
+                // else there is no need to clear the database
+                //  * When a new quorum is established we can still apply the diff
+                //    on top of the same zkDb data
+                //  * If we fetch a new snapshot from leader, the zkDb will be
+                //    cleared anyway before loading the snapshot
+                try {
+                    //This will fast forward the database to the latest recorded transactions
+<span class="nc" id="L876">                    zkDb.fastForwardDataBase();</span>
+<span class="nc" id="L877">                } catch (IOException e) {</span>
+<span class="nc" id="L878">                    LOG.error(&quot;Error updating DB&quot;, e);</span>
+<span class="nc" id="L879">                    zkDb.clear();</span>
+<span class="nc" id="L880">                }</span>
+            }
+        }
+
+<span class="nc" id="L884">        requestPathMetricsCollector.shutdown();</span>
+<span class="nc" id="L885">        unregisterJMX();</span>
+<span class="nc" id="L886">    }</span>
+
+    protected void unregisterJMX() {
+        // unregister from JMX
+        try {
+<span class="nc bnc" id="L891" title="All 2 branches missed.">            if (jmxDataTreeBean != null) {</span>
+<span class="nc" id="L892">                MBeanRegistry.getInstance().unregister(jmxDataTreeBean);</span>
+            }
+<span class="nc" id="L894">        } catch (Exception e) {</span>
+<span class="nc" id="L895">            LOG.warn(&quot;Failed to unregister with JMX&quot;, e);</span>
+<span class="nc" id="L896">        }</span>
+        try {
+<span class="nc bnc" id="L898" title="All 2 branches missed.">            if (jmxServerBean != null) {</span>
+<span class="nc" id="L899">                MBeanRegistry.getInstance().unregister(jmxServerBean);</span>
+            }
+<span class="nc" id="L901">        } catch (Exception e) {</span>
+<span class="nc" id="L902">            LOG.warn(&quot;Failed to unregister with JMX&quot;, e);</span>
+<span class="nc" id="L903">        }</span>
+<span class="nc" id="L904">        jmxServerBean = null;</span>
+<span class="nc" id="L905">        jmxDataTreeBean = null;</span>
+<span class="nc" id="L906">    }</span>
+
+    public void incInProcess() {
+<span class="nc" id="L909">        requestsInProcess.incrementAndGet();</span>
+<span class="nc" id="L910">    }</span>
+
+    public void decInProcess() {
+<span class="nc" id="L913">        requestsInProcess.decrementAndGet();</span>
+<span class="nc bnc" id="L914" title="All 2 branches missed.">        if (requestThrottler != null) {</span>
+<span class="nc" id="L915">            requestThrottler.throttleWake();</span>
+        }
+<span class="nc" id="L917">    }</span>
+
+    public int getInProcess() {
+<span class="nc" id="L920">        return requestsInProcess.get();</span>
+    }
+
+    public int getInflight() {
+<span class="nc" id="L924">        return requestThrottleInflight();</span>
+    }
+
+    private int requestThrottleInflight() {
+<span class="nc bnc" id="L928" title="All 2 branches missed.">        if (requestThrottler != null) {</span>
+<span class="nc" id="L929">            return requestThrottler.getInflight();</span>
+        }
+<span class="nc" id="L931">        return 0;</span>
+    }
+
+    static class PrecalculatedDigest {
+        final long nodeDigest;
+        final long treeDigest;
+
+<span class="nc" id="L938">        PrecalculatedDigest(long nodeDigest, long treeDigest) {</span>
+<span class="nc" id="L939">            this.nodeDigest = nodeDigest;</span>
+<span class="nc" id="L940">            this.treeDigest = treeDigest;</span>
+<span class="nc" id="L941">        }</span>
+    }
+
+
+    /**
+     * This structure is used to facilitate information sharing between PrepRP
+     * and FinalRP.
+     */
+    static class ChangeRecord {
+        PrecalculatedDigest precalculatedDigest;
+        byte[] data;
+
+<span class="nc" id="L953">        ChangeRecord(long zxid, String path, StatPersisted stat, int childCount, List&lt;ACL&gt; acl) {</span>
+<span class="nc" id="L954">            this.zxid = zxid;</span>
+<span class="nc" id="L955">            this.path = path;</span>
+<span class="nc" id="L956">            this.stat = stat;</span>
+<span class="nc" id="L957">            this.childCount = childCount;</span>
+<span class="nc" id="L958">            this.acl = acl;</span>
+<span class="nc" id="L959">        }</span>
+
+        long zxid;
+
+        String path;
+
+        StatPersisted stat; /* Make sure to create a new object when changing */
+
+        int childCount;
+
+        List&lt;ACL&gt; acl; /* Make sure to create a new object when changing */
+
+        ChangeRecord duplicate(long zxid) {
+<span class="nc" id="L972">            StatPersisted stat = new StatPersisted();</span>
+<span class="nc bnc" id="L973" title="All 2 branches missed.">            if (this.stat != null) {</span>
+<span class="nc" id="L974">                DataTree.copyStatPersisted(this.stat, stat);</span>
+            }
+<span class="nc" id="L976">            ChangeRecord changeRecord = new ChangeRecord(zxid, path, stat, childCount,</span>
+<span class="nc bnc" id="L977" title="All 2 branches missed.">                    acl == null ? new ArrayList&lt;&gt;() : new ArrayList&lt;&gt;(acl));</span>
+<span class="nc" id="L978">            changeRecord.precalculatedDigest = precalculatedDigest;</span>
+<span class="nc" id="L979">            changeRecord.data = data;</span>
+<span class="nc" id="L980">            return changeRecord;</span>
+        }
+
+    }
+
+    byte[] generatePasswd(long id) {
+<span class="nc" id="L986">        Random r = new Random(id ^ superSecret);</span>
+<span class="nc" id="L987">        byte[] p = new byte[16];</span>
+<span class="nc" id="L988">        r.nextBytes(p);</span>
+<span class="nc" id="L989">        return p;</span>
+    }
+
+    protected boolean checkPasswd(long sessionId, byte[] passwd) {
+<span class="nc bnc" id="L993" title="All 4 branches missed.">        return sessionId != 0 &amp;&amp; Arrays.equals(passwd, generatePasswd(sessionId));</span>
+    }
+
+    long createSession(ServerCnxn cnxn, byte[] passwd, int timeout) {
+<span class="nc bnc" id="L997" title="All 2 branches missed.">        if (passwd == null) {</span>
+            // Possible since it's just deserialized from a packet on the wire.
+<span class="nc" id="L999">            passwd = new byte[0];</span>
+        }
+<span class="nc" id="L1001">        long sessionId = sessionTracker.createSession(timeout);</span>
+<span class="nc" id="L1002">        Random r = new Random(sessionId ^ superSecret);</span>
+<span class="nc" id="L1003">        r.nextBytes(passwd);</span>
+<span class="nc" id="L1004">        ByteBuffer to = ByteBuffer.allocate(4);</span>
+<span class="nc" id="L1005">        to.putInt(timeout);</span>
+<span class="nc" id="L1006">        cnxn.setSessionId(sessionId);</span>
+<span class="nc" id="L1007">        Request si = new Request(cnxn, sessionId, 0, OpCode.createSession, to, null);</span>
+<span class="nc" id="L1008">        submitRequest(si);</span>
+<span class="nc" id="L1009">        return sessionId;</span>
+    }
+
+    /**
+     * set the owner of this session as owner
+     * @param id the session id
+     * @param owner the owner of the session
+     * @throws SessionExpiredException
+     */
+    public void setOwner(long id, Object owner) throws SessionExpiredException {
+<span class="nc" id="L1019">        sessionTracker.setOwner(id, owner);</span>
+<span class="nc" id="L1020">    }</span>
+
+    protected void revalidateSession(ServerCnxn cnxn, long sessionId, int sessionTimeout) throws IOException {
+<span class="nc" id="L1023">        boolean rc = sessionTracker.touchSession(sessionId, sessionTimeout);</span>
+<span class="nc bnc" id="L1024" title="All 2 branches missed.">        if (LOG.isTraceEnabled()) {</span>
+<span class="nc" id="L1025">            ZooTrace.logTraceMessage(</span>
+                LOG,
+                ZooTrace.SESSION_TRACE_MASK,
+<span class="nc" id="L1028">                &quot;Session 0x&quot; + Long.toHexString(sessionId) + &quot; is valid: &quot; + rc);</span>
+        }
+<span class="nc" id="L1030">        finishSessionInit(cnxn, rc);</span>
+<span class="nc" id="L1031">    }</span>
+
+    public void reopenSession(ServerCnxn cnxn, long sessionId, byte[] passwd, int sessionTimeout) throws IOException {
+<span class="nc bnc" id="L1034" title="All 2 branches missed.">        if (checkPasswd(sessionId, passwd)) {</span>
+<span class="nc" id="L1035">            revalidateSession(cnxn, sessionId, sessionTimeout);</span>
+        } else {
+<span class="nc" id="L1037">            LOG.warn(</span>
+                &quot;Incorrect password from {} for session 0x{}&quot;,
+<span class="nc" id="L1039">                cnxn.getRemoteSocketAddress(),</span>
+<span class="nc" id="L1040">                Long.toHexString(sessionId));</span>
+<span class="nc" id="L1041">            finishSessionInit(cnxn, false);</span>
+        }
+<span class="nc" id="L1043">    }</span>
+
+    public void finishSessionInit(ServerCnxn cnxn, boolean valid) {
+        // register with JMX
+        try {
+<span class="nc bnc" id="L1048" title="All 2 branches missed.">            if (valid) {</span>
+<span class="nc bnc" id="L1049" title="All 4 branches missed.">                if (serverCnxnFactory != null &amp;&amp; serverCnxnFactory.cnxns.contains(cnxn)) {</span>
+<span class="nc" id="L1050">                    serverCnxnFactory.registerConnection(cnxn);</span>
+<span class="nc bnc" id="L1051" title="All 4 branches missed.">                } else if (secureServerCnxnFactory != null &amp;&amp; secureServerCnxnFactory.cnxns.contains(cnxn)) {</span>
+<span class="nc" id="L1052">                    secureServerCnxnFactory.registerConnection(cnxn);</span>
+                }
+            }
+<span class="nc" id="L1055">        } catch (Exception e) {</span>
+<span class="nc" id="L1056">            LOG.warn(&quot;Failed to register with JMX&quot;, e);</span>
+<span class="nc" id="L1057">        }</span>
+
+        try {
+<span class="nc" id="L1060">            ConnectResponse rsp = new ConnectResponse(</span>
+                0,
+<span class="nc bnc" id="L1062" title="All 2 branches missed.">                valid ? cnxn.getSessionTimeout() : 0,</span>
+<span class="nc bnc" id="L1063" title="All 2 branches missed.">                valid ? cnxn.getSessionId() : 0, // send 0 if session is no</span>
+                // longer valid
+<span class="nc bnc" id="L1065" title="All 2 branches missed.">                valid ? generatePasswd(cnxn.getSessionId()) : new byte[16]);</span>
+<span class="nc" id="L1066">            ByteArrayOutputStream baos = new ByteArrayOutputStream();</span>
+<span class="nc" id="L1067">            BinaryOutputArchive bos = BinaryOutputArchive.getArchive(baos);</span>
+<span class="nc" id="L1068">            bos.writeInt(-1, &quot;len&quot;);</span>
+<span class="nc" id="L1069">            rsp.serialize(bos, &quot;connect&quot;);</span>
+<span class="nc bnc" id="L1070" title="All 2 branches missed.">            if (!cnxn.isOldClient) {</span>
+<span class="nc" id="L1071">                bos.writeBool(this instanceof ReadOnlyZooKeeperServer, &quot;readOnly&quot;);</span>
+            }
+<span class="nc" id="L1073">            baos.close();</span>
+<span class="nc" id="L1074">            ByteBuffer bb = ByteBuffer.wrap(baos.toByteArray());</span>
+<span class="nc" id="L1075">            bb.putInt(bb.remaining() - 4).rewind();</span>
+<span class="nc" id="L1076">            cnxn.sendBuffer(bb);</span>
+
+<span class="nc bnc" id="L1078" title="All 2 branches missed.">            if (valid) {</span>
+<span class="nc" id="L1079">                LOG.debug(</span>
+                    &quot;Established session 0x{} with negotiated timeout {} for client {}&quot;,
+<span class="nc" id="L1081">                    Long.toHexString(cnxn.getSessionId()),</span>
+<span class="nc" id="L1082">                    cnxn.getSessionTimeout(),</span>
+<span class="nc" id="L1083">                    cnxn.getRemoteSocketAddress());</span>
+<span class="nc" id="L1084">                cnxn.enableRecv();</span>
+            } else {
+
+<span class="nc" id="L1087">                LOG.info(</span>
+                    &quot;Invalid session 0x{} for client {}, probably expired&quot;,
+<span class="nc" id="L1089">                    Long.toHexString(cnxn.getSessionId()),</span>
+<span class="nc" id="L1090">                    cnxn.getRemoteSocketAddress());</span>
+<span class="nc" id="L1091">                cnxn.sendBuffer(ServerCnxnFactory.closeConn);</span>
+            }
+
+<span class="nc" id="L1094">        } catch (Exception e) {</span>
+<span class="nc" id="L1095">            LOG.warn(&quot;Exception while establishing session, closing&quot;, e);</span>
+<span class="nc" id="L1096">            cnxn.close(ServerCnxn.DisconnectReason.IO_EXCEPTION_IN_SESSION_INIT);</span>
+<span class="nc" id="L1097">        }</span>
+<span class="nc" id="L1098">    }</span>
+
+    public void closeSession(ServerCnxn cnxn, RequestHeader requestHeader) {
+<span class="nc" id="L1101">        closeSession(cnxn.getSessionId());</span>
+<span class="nc" id="L1102">    }</span>
+
+    public long getServerId() {
+<span class="nc" id="L1105">        return 0;</span>
+    }
+
+    /**
+     * If the underlying Zookeeper server support local session, this method
+     * will set a isLocalSession to true if a request is associated with
+     * a local session.
+     *
+     * @param si
+     */
+    protected void setLocalSessionFlag(Request si) {
+<span class="nc" id="L1116">    }</span>
+
+    public void submitRequest(Request si) {
+<span class="nc" id="L1119">        enqueueRequest(si);</span>
+<span class="nc" id="L1120">    }</span>
+
+    public void enqueueRequest(Request si) {
+<span class="nc bnc" id="L1123" title="All 2 branches missed.">        if (requestThrottler == null) {</span>
+<span class="nc" id="L1124">            synchronized (this) {</span>
+                try {
+                    // Since all requests are passed to the request
+                    // processor it should wait for setting up the request
+                    // processor chain. The state will be updated to RUNNING
+                    // after the setup.
+<span class="nc bnc" id="L1130" title="All 2 branches missed.">                    while (state == State.INITIAL) {</span>
+<span class="nc" id="L1131">                        wait(1000);</span>
+                    }
+<span class="nc" id="L1133">                } catch (InterruptedException e) {</span>
+<span class="nc" id="L1134">                    LOG.warn(&quot;Unexpected interruption&quot;, e);</span>
+<span class="nc" id="L1135">                }</span>
+<span class="nc bnc" id="L1136" title="All 2 branches missed.">                if (requestThrottler == null) {</span>
+<span class="nc" id="L1137">                    throw new RuntimeException(&quot;Not started&quot;);</span>
+                }
+<span class="nc" id="L1139">            }</span>
+        }
+<span class="nc" id="L1141">        requestThrottler.submitRequest(si);</span>
+<span class="nc" id="L1142">    }</span>
+
+    public void submitRequestNow(Request si) {
+<span class="nc bnc" id="L1145" title="All 2 branches missed.">        if (firstProcessor == null) {</span>
+<span class="nc" id="L1146">            synchronized (this) {</span>
+                try {
+                    // Since all requests are passed to the request
+                    // processor it should wait for setting up the request
+                    // processor chain. The state will be updated to RUNNING
+                    // after the setup.
+<span class="nc bnc" id="L1152" title="All 2 branches missed.">                    while (state == State.INITIAL) {</span>
+<span class="nc" id="L1153">                        wait(1000);</span>
+                    }
+<span class="nc" id="L1155">                } catch (InterruptedException e) {</span>
+<span class="nc" id="L1156">                    LOG.warn(&quot;Unexpected interruption&quot;, e);</span>
+<span class="nc" id="L1157">                }</span>
+<span class="nc bnc" id="L1158" title="All 4 branches missed.">                if (firstProcessor == null || state != State.RUNNING) {</span>
+<span class="nc" id="L1159">                    throw new RuntimeException(&quot;Not started&quot;);</span>
+                }
+<span class="nc" id="L1161">            }</span>
+        }
+        try {
+<span class="nc" id="L1164">            touch(si.cnxn);</span>
+<span class="nc" id="L1165">            boolean validpacket = Request.isValid(si.type);</span>
+<span class="nc bnc" id="L1166" title="All 2 branches missed.">            if (validpacket) {</span>
+<span class="nc" id="L1167">                setLocalSessionFlag(si);</span>
+<span class="nc" id="L1168">                firstProcessor.processRequest(si);</span>
+<span class="nc bnc" id="L1169" title="All 2 branches missed.">                if (si.cnxn != null) {</span>
+<span class="nc" id="L1170">                    incInProcess();</span>
+                }
+            } else {
+<span class="nc" id="L1173">                LOG.warn(&quot;Received packet at server of unknown type {}&quot;, si.type);</span>
+                // Update request accounting/throttling limits
+<span class="nc" id="L1175">                requestFinished(si);</span>
+<span class="nc" id="L1176">                new UnimplementedRequestProcessor().processRequest(si);</span>
+            }
+<span class="nc" id="L1178">        } catch (MissingSessionException e) {</span>
+<span class="nc" id="L1179">            LOG.debug(&quot;Dropping request.&quot;, e);</span>
+            // Update request accounting/throttling limits
+<span class="nc" id="L1181">            requestFinished(si);</span>
+<span class="nc" id="L1182">        } catch (RequestProcessorException e) {</span>
+<span class="nc" id="L1183">            LOG.error(&quot;Unable to process request&quot;, e);</span>
+            // Update request accounting/throttling limits
+<span class="nc" id="L1185">            requestFinished(si);</span>
+<span class="nc" id="L1186">        }</span>
+<span class="nc" id="L1187">    }</span>
+
+    public static int getSnapCount() {
+<span class="nc" id="L1190">        int snapCount = Integer.getInteger(SNAP_COUNT, DEFAULT_SNAP_COUNT);</span>
+        // snapCount must be 2 or more. See org.apache.zookeeper.server.SyncRequestProcessor
+<span class="nc bnc" id="L1192" title="All 2 branches missed.">        if (snapCount &lt; 2) {</span>
+<span class="nc" id="L1193">            LOG.warn(&quot;SnapCount should be 2 or more. Now, snapCount is reset to 2&quot;);</span>
+<span class="nc" id="L1194">            snapCount = 2;</span>
+        }
+<span class="nc" id="L1196">        return snapCount;</span>
+    }
+
+    public int getGlobalOutstandingLimit() {
+<span class="nc" id="L1200">        return Integer.getInteger(GLOBAL_OUTSTANDING_LIMIT, DEFAULT_GLOBAL_OUTSTANDING_LIMIT);</span>
+    }
+
+    public static long getSnapSizeInBytes() {
+<span class="nc" id="L1204">        long size = Long.getLong(&quot;zookeeper.snapSizeLimitInKb&quot;, 4194304L); // 4GB by default</span>
+<span class="nc bnc" id="L1205" title="All 2 branches missed.">        if (size &lt;= 0) {</span>
+<span class="nc" id="L1206">            LOG.info(&quot;zookeeper.snapSizeLimitInKb set to a non-positive value {}; disabling feature&quot;, size);</span>
+        }
+<span class="nc" id="L1208">        return size * 1024; // Convert to bytes</span>
+    }
+
+    public void setServerCnxnFactory(ServerCnxnFactory factory) {
+<span class="nc" id="L1212">        serverCnxnFactory = factory;</span>
+<span class="nc" id="L1213">    }</span>
+
+    public ServerCnxnFactory getServerCnxnFactory() {
+<span class="nc" id="L1216">        return serverCnxnFactory;</span>
+    }
+
+    public ServerCnxnFactory getSecureServerCnxnFactory() {
+<span class="nc" id="L1220">        return secureServerCnxnFactory;</span>
+    }
+
+    public void setSecureServerCnxnFactory(ServerCnxnFactory factory) {
+<span class="nc" id="L1224">        secureServerCnxnFactory = factory;</span>
+<span class="nc" id="L1225">    }</span>
+
+    /**
+     * return the last processed id from the
+     * datatree
+     */
+    public long getLastProcessedZxid() {
+<span class="nc" id="L1232">        return zkDb.getDataTreeLastProcessedZxid();</span>
+    }
+
+    /**
+     * return the outstanding requests
+     * in the queue, which haven't been
+     * processed yet
+     */
+    public long getOutstandingRequests() {
+<span class="nc" id="L1241">        return getInProcess();</span>
+    }
+
+    /**
+     * return the total number of client connections that are alive
+     * to this server
+     */
+    public int getNumAliveConnections() {
+<span class="nc" id="L1249">        int numAliveConnections = 0;</span>
+
+<span class="nc bnc" id="L1251" title="All 2 branches missed.">        if (serverCnxnFactory != null) {</span>
+<span class="nc" id="L1252">            numAliveConnections += serverCnxnFactory.getNumAliveConnections();</span>
+        }
+
+<span class="nc bnc" id="L1255" title="All 2 branches missed.">        if (secureServerCnxnFactory != null) {</span>
+<span class="nc" id="L1256">            numAliveConnections += secureServerCnxnFactory.getNumAliveConnections();</span>
+        }
+
+<span class="nc" id="L1259">        return numAliveConnections;</span>
+    }
+
+    /**
+     * truncate the log to get in sync with others
+     * if in a quorum
+     * @param zxid the zxid that it needs to get in sync
+     * with others
+     * @throws IOException
+     */
+    public void truncateLog(long zxid) throws IOException {
+<span class="nc" id="L1270">        this.zkDb.truncateLog(zxid);</span>
+<span class="nc" id="L1271">    }</span>
+
+    public int getTickTime() {
+<span class="nc" id="L1274">        return tickTime;</span>
+    }
+
+    public void setTickTime(int tickTime) {
+<span class="nc" id="L1278">        LOG.info(&quot;tickTime set to {} ms&quot;, tickTime);</span>
+<span class="nc" id="L1279">        this.tickTime = tickTime;</span>
+<span class="nc" id="L1280">    }</span>
+
+    public static int getThrottledOpWaitTime() {
+<span class="nc" id="L1283">        return throttledOpWaitTime;</span>
+    }
+
+    public static void setThrottledOpWaitTime(int time) {
+<span class="nc" id="L1287">        LOG.info(&quot;throttledOpWaitTime set to {} ms&quot;, time);</span>
+<span class="nc" id="L1288">        throttledOpWaitTime = time;</span>
+<span class="nc" id="L1289">    }</span>
+
+    public int getMinSessionTimeout() {
+<span class="nc" id="L1292">        return minSessionTimeout;</span>
+    }
+
+    public void setMinSessionTimeout(int min) {
+<span class="nc bnc" id="L1296" title="All 2 branches missed.">        this.minSessionTimeout = min == -1 ? tickTime * 2 : min;</span>
+<span class="nc" id="L1297">        LOG.info(&quot;minSessionTimeout set to {} ms&quot;, this.minSessionTimeout);</span>
+<span class="nc" id="L1298">    }</span>
+
+    public int getMaxSessionTimeout() {
+<span class="nc" id="L1301">        return maxSessionTimeout;</span>
+    }
+
+    public void setMaxSessionTimeout(int max) {
+<span class="nc bnc" id="L1305" title="All 2 branches missed.">        this.maxSessionTimeout = max == -1 ? tickTime * 20 : max;</span>
+<span class="nc" id="L1306">        LOG.info(&quot;maxSessionTimeout set to {} ms&quot;, this.maxSessionTimeout);</span>
+<span class="nc" id="L1307">    }</span>
+
+    public int getClientPortListenBacklog() {
+<span class="nc" id="L1310">        return listenBacklog;</span>
+    }
+
+    public void setClientPortListenBacklog(int backlog) {
+<span class="nc" id="L1314">        this.listenBacklog = backlog;</span>
+<span class="nc" id="L1315">        LOG.info(&quot;clientPortListenBacklog set to {}&quot;, backlog);</span>
+<span class="nc" id="L1316">    }</span>
+
+    public int getClientPort() {
+<span class="nc bnc" id="L1319" title="All 2 branches missed.">        return serverCnxnFactory != null ? serverCnxnFactory.getLocalPort() : -1;</span>
+    }
+
+    public int getSecureClientPort() {
+<span class="nc bnc" id="L1323" title="All 2 branches missed.">        return secureServerCnxnFactory != null ? secureServerCnxnFactory.getLocalPort() : -1;</span>
+    }
+
+    /** Maximum number of connections allowed from particular host (ip) */
+    public int getMaxClientCnxnsPerHost() {
+<span class="nc bnc" id="L1328" title="All 2 branches missed.">        if (serverCnxnFactory != null) {</span>
+<span class="nc" id="L1329">            return serverCnxnFactory.getMaxClientCnxnsPerHost();</span>
+        }
+<span class="nc bnc" id="L1331" title="All 2 branches missed.">        if (secureServerCnxnFactory != null) {</span>
+<span class="nc" id="L1332">            return secureServerCnxnFactory.getMaxClientCnxnsPerHost();</span>
+        }
+<span class="nc" id="L1334">        return -1;</span>
+    }
+
+    public void setTxnLogFactory(FileTxnSnapLog txnLog) {
+<span class="nc" id="L1338">        this.txnLogFactory = txnLog;</span>
+<span class="nc" id="L1339">    }</span>
+
+    public FileTxnSnapLog getTxnLogFactory() {
+<span class="nc" id="L1342">        return this.txnLogFactory;</span>
+    }
+
+    /**
+     * Returns the elapsed sync of time of transaction log in milliseconds.
+     */
+    public long getTxnLogElapsedSyncTime() {
+<span class="nc" id="L1349">        return txnLogFactory.getTxnLogElapsedSyncTime();</span>
+    }
+
+    public String getState() {
+<span class="nc" id="L1353">        return &quot;standalone&quot;;</span>
+    }
+
+    public void dumpEphemerals(PrintWriter pwriter) {
+<span class="nc" id="L1357">        zkDb.dumpEphemerals(pwriter);</span>
+<span class="nc" id="L1358">    }</span>
+
+    public Map&lt;Long, Set&lt;String&gt;&gt; getEphemerals() {
+<span class="nc" id="L1361">        return zkDb.getEphemerals();</span>
+    }
+
+    public double getConnectionDropChance() {
+<span class="nc" id="L1365">        return connThrottle.getDropChance();</span>
+    }
+
+    @SuppressFBWarnings(value = &quot;IS2_INCONSISTENT_SYNC&quot;, justification = &quot;the value won't change after startup&quot;)
+    public void processConnectRequest(ServerCnxn cnxn, ByteBuffer incomingBuffer)
+        throws IOException, ClientCnxnLimitException {
+
+<span class="nc" id="L1372">        BinaryInputArchive bia = BinaryInputArchive.getArchive(new ByteBufferInputStream(incomingBuffer));</span>
+<span class="nc" id="L1373">        ConnectRequest connReq = new ConnectRequest();</span>
+<span class="nc" id="L1374">        connReq.deserialize(bia, &quot;connect&quot;);</span>
+<span class="nc" id="L1375">        LOG.debug(</span>
+            &quot;Session establishment request from client {} client's lastZxid is 0x{}&quot;,
+<span class="nc" id="L1377">            cnxn.getRemoteSocketAddress(),</span>
+<span class="nc" id="L1378">            Long.toHexString(connReq.getLastZxidSeen()));</span>
+
+<span class="nc" id="L1380">        long sessionId = connReq.getSessionId();</span>
+<span class="nc" id="L1381">        int tokensNeeded = 1;</span>
+<span class="nc bnc" id="L1382" title="All 2 branches missed.">        if (connThrottle.isConnectionWeightEnabled()) {</span>
+<span class="nc bnc" id="L1383" title="All 2 branches missed.">            if (sessionId == 0) {</span>
+<span class="nc bnc" id="L1384" title="All 2 branches missed.">                if (localSessionEnabled) {</span>
+<span class="nc" id="L1385">                    tokensNeeded = connThrottle.getRequiredTokensForLocal();</span>
+                } else {
+<span class="nc" id="L1387">                    tokensNeeded = connThrottle.getRequiredTokensForGlobal();</span>
+                }
+            } else {
+<span class="nc" id="L1390">                tokensNeeded = connThrottle.getRequiredTokensForRenew();</span>
+            }
+        }
+
+<span class="nc bnc" id="L1394" title="All 2 branches missed.">        if (!connThrottle.checkLimit(tokensNeeded)) {</span>
+<span class="nc" id="L1395">            throw new ClientCnxnLimitException();</span>
+        }
+<span class="nc" id="L1397">        ServerMetrics.getMetrics().CONNECTION_TOKEN_DEFICIT.add(connThrottle.getDeficit());</span>
+
+<span class="nc" id="L1399">        ServerMetrics.getMetrics().CONNECTION_REQUEST_COUNT.add(1);</span>
+
+<span class="nc" id="L1401">        boolean readOnly = false;</span>
+        try {
+<span class="nc" id="L1403">            readOnly = bia.readBool(&quot;readOnly&quot;);</span>
+<span class="nc" id="L1404">            cnxn.isOldClient = false;</span>
+<span class="nc" id="L1405">        } catch (IOException e) {</span>
+            // this is ok -- just a packet from an old client which
+            // doesn't contain readOnly field
+<span class="nc" id="L1408">            LOG.warn(</span>
+                &quot;Connection request from old client {}; will be dropped if server is in r-o mode&quot;,
+<span class="nc" id="L1410">                cnxn.getRemoteSocketAddress());</span>
+<span class="nc" id="L1411">        }</span>
+<span class="nc bnc" id="L1412" title="All 4 branches missed.">        if (!readOnly &amp;&amp; this instanceof ReadOnlyZooKeeperServer) {</span>
+<span class="nc" id="L1413">            String msg = &quot;Refusing session request for not-read-only client &quot; + cnxn.getRemoteSocketAddress();</span>
+<span class="nc" id="L1414">            LOG.info(msg);</span>
+<span class="nc" id="L1415">            throw new CloseRequestException(msg, ServerCnxn.DisconnectReason.NOT_READ_ONLY_CLIENT);</span>
+        }
+<span class="nc bnc" id="L1417" title="All 2 branches missed.">        if (connReq.getLastZxidSeen() &gt; zkDb.dataTree.lastProcessedZxid) {</span>
+<span class="nc" id="L1418">            String msg = &quot;Refusing session request for client &quot;</span>
+<span class="nc" id="L1419">                         + cnxn.getRemoteSocketAddress()</span>
+                         + &quot; as it has seen zxid 0x&quot;
+<span class="nc" id="L1421">                         + Long.toHexString(connReq.getLastZxidSeen())</span>
+                         + &quot; our last zxid is 0x&quot;
+<span class="nc" id="L1423">                         + Long.toHexString(getZKDatabase().getDataTreeLastProcessedZxid())</span>
+                         + &quot; client must try another server&quot;;
+
+<span class="nc" id="L1426">            LOG.info(msg);</span>
+<span class="nc" id="L1427">            throw new CloseRequestException(msg, ServerCnxn.DisconnectReason.CLIENT_ZXID_AHEAD);</span>
+        }
+<span class="nc" id="L1429">        int sessionTimeout = connReq.getTimeOut();</span>
+<span class="nc" id="L1430">        byte[] passwd = connReq.getPasswd();</span>
+<span class="nc" id="L1431">        int minSessionTimeout = getMinSessionTimeout();</span>
+<span class="nc bnc" id="L1432" title="All 2 branches missed.">        if (sessionTimeout &lt; minSessionTimeout) {</span>
+<span class="nc" id="L1433">            sessionTimeout = minSessionTimeout;</span>
+        }
+<span class="nc" id="L1435">        int maxSessionTimeout = getMaxSessionTimeout();</span>
+<span class="nc bnc" id="L1436" title="All 2 branches missed.">        if (sessionTimeout &gt; maxSessionTimeout) {</span>
+<span class="nc" id="L1437">            sessionTimeout = maxSessionTimeout;</span>
+        }
+<span class="nc" id="L1439">        cnxn.setSessionTimeout(sessionTimeout);</span>
+        // We don't want to receive any packets until we are sure that the
+        // session is setup
+<span class="nc" id="L1442">        cnxn.disableRecv();</span>
+<span class="nc bnc" id="L1443" title="All 2 branches missed.">        if (sessionId == 0) {</span>
+<span class="nc" id="L1444">            long id = createSession(cnxn, passwd, sessionTimeout);</span>
+<span class="nc" id="L1445">            LOG.debug(</span>
+                &quot;Client attempting to establish new session: session = 0x{}, zxid = 0x{}, timeout = {}, address = {}&quot;,
+<span class="nc" id="L1447">                Long.toHexString(id),</span>
+<span class="nc" id="L1448">                Long.toHexString(connReq.getLastZxidSeen()),</span>
+<span class="nc" id="L1449">                connReq.getTimeOut(),</span>
+<span class="nc" id="L1450">                cnxn.getRemoteSocketAddress());</span>
+<span class="nc" id="L1451">        } else {</span>
+<span class="nc" id="L1452">            validateSession(cnxn, sessionId);</span>
+<span class="nc" id="L1453">            LOG.debug(</span>
+                &quot;Client attempting to renew session: session = 0x{}, zxid = 0x{}, timeout = {}, address = {}&quot;,
+<span class="nc" id="L1455">                Long.toHexString(sessionId),</span>
+<span class="nc" id="L1456">                Long.toHexString(connReq.getLastZxidSeen()),</span>
+<span class="nc" id="L1457">                connReq.getTimeOut(),</span>
+<span class="nc" id="L1458">                cnxn.getRemoteSocketAddress());</span>
+<span class="nc bnc" id="L1459" title="All 2 branches missed.">            if (serverCnxnFactory != null) {</span>
+<span class="nc" id="L1460">                serverCnxnFactory.closeSession(sessionId, ServerCnxn.DisconnectReason.CLIENT_RECONNECT);</span>
+            }
+<span class="nc bnc" id="L1462" title="All 2 branches missed.">            if (secureServerCnxnFactory != null) {</span>
+<span class="nc" id="L1463">                secureServerCnxnFactory.closeSession(sessionId, ServerCnxn.DisconnectReason.CLIENT_RECONNECT);</span>
+            }
+<span class="nc" id="L1465">            cnxn.setSessionId(sessionId);</span>
+<span class="nc" id="L1466">            reopenSession(cnxn, sessionId, passwd, sessionTimeout);</span>
+<span class="nc" id="L1467">            ServerMetrics.getMetrics().CONNECTION_REVALIDATE_COUNT.add(1);</span>
+
+        }
+<span class="nc" id="L1470">    }</span>
+
+    /**
+     * Validate if a particular session can be reestablished.
+     *
+     * @param cnxn
+     * @param sessionId
+     */
+    protected void validateSession(ServerCnxn cnxn, long sessionId)
+            throws IOException {
+        // do nothing
+<span class="nc" id="L1481">    }</span>
+
+    public boolean shouldThrottle(long outStandingCount) {
+<span class="nc" id="L1484">        int globalOutstandingLimit = getGlobalOutstandingLimit();</span>
+<span class="nc bnc" id="L1485" title="All 4 branches missed.">        if (globalOutstandingLimit &lt; getInflight() || globalOutstandingLimit &lt; getInProcess()) {</span>
+<span class="nc bnc" id="L1486" title="All 2 branches missed.">            return outStandingCount &gt; 0;</span>
+        }
+<span class="nc" id="L1488">        return false;</span>
+    }
+
+    long getFlushDelay() {
+<span class="nc" id="L1492">        return flushDelay;</span>
+    }
+
+    static void setFlushDelay(long delay) {
+<span class="fc" id="L1496">        LOG.info(&quot;{} = {} ms&quot;, FLUSH_DELAY, delay);</span>
+<span class="fc" id="L1497">        flushDelay = delay;</span>
+<span class="fc" id="L1498">    }</span>
+
+    long getMaxWriteQueuePollTime() {
+<span class="nc" id="L1501">        return maxWriteQueuePollTime;</span>
+    }
+
+    static void setMaxWriteQueuePollTime(long maxTime) {
+<span class="fc" id="L1505">        LOG.info(&quot;{} = {} ms&quot;, MAX_WRITE_QUEUE_POLL_SIZE, maxTime);</span>
+<span class="fc" id="L1506">        maxWriteQueuePollTime = maxTime;</span>
+<span class="fc" id="L1507">    }</span>
+
+    int getMaxBatchSize() {
+<span class="nc" id="L1510">        return maxBatchSize;</span>
+    }
+
+    static void setMaxBatchSize(int size) {
+<span class="fc" id="L1514">        LOG.info(&quot;{}={}&quot;, MAX_BATCH_SIZE, size);</span>
+<span class="fc" id="L1515">        maxBatchSize = size;</span>
+<span class="fc" id="L1516">    }</span>
+
+    private void initLargeRequestThrottlingSettings() {
+<span class="nc" id="L1519">        setLargeRequestMaxBytes(Integer.getInteger(&quot;zookeeper.largeRequestMaxBytes&quot;, largeRequestMaxBytes));</span>
+<span class="nc" id="L1520">        setLargeRequestThreshold(Integer.getInteger(&quot;zookeeper.largeRequestThreshold&quot;, -1));</span>
+<span class="nc" id="L1521">    }</span>
+
+    public int getLargeRequestMaxBytes() {
+<span class="nc" id="L1524">        return largeRequestMaxBytes;</span>
+    }
+
+    public void setLargeRequestMaxBytes(int bytes) {
+<span class="nc bnc" id="L1528" title="All 2 branches missed.">        if (bytes &lt;= 0) {</span>
+<span class="nc" id="L1529">            LOG.warn(&quot;Invalid max bytes for all large requests {}. It should be a positive number.&quot;, bytes);</span>
+<span class="nc" id="L1530">            LOG.warn(&quot;Will not change the setting. The max bytes stay at {}&quot;, largeRequestMaxBytes);</span>
+        } else {
+<span class="nc" id="L1532">            largeRequestMaxBytes = bytes;</span>
+<span class="nc" id="L1533">            LOG.info(&quot;The max bytes for all large requests are set to {}&quot;, largeRequestMaxBytes);</span>
+        }
+<span class="nc" id="L1535">    }</span>
+
+    public int getLargeRequestThreshold() {
+<span class="nc" id="L1538">        return largeRequestThreshold;</span>
+    }
+
+    public void setLargeRequestThreshold(int threshold) {
+<span class="nc bnc" id="L1542" title="All 4 branches missed.">        if (threshold == 0 || threshold &lt; -1) {</span>
+<span class="nc" id="L1543">            LOG.warn(&quot;Invalid large request threshold {}. It should be -1 or positive. Setting to -1 &quot;, threshold);</span>
+<span class="nc" id="L1544">            largeRequestThreshold = -1;</span>
+        } else {
+<span class="nc" id="L1546">            largeRequestThreshold = threshold;</span>
+<span class="nc" id="L1547">            LOG.info(&quot;The large request threshold is set to {}&quot;, largeRequestThreshold);</span>
+        }
+<span class="nc" id="L1549">    }</span>
+
+    public int getLargeRequestBytes() {
+<span class="nc" id="L1552">        return currentLargeRequestBytes.get();</span>
+    }
+
+    private boolean isLargeRequest(int length) {
+        // The large request limit is disabled when threshold is -1
+<span class="nc bnc" id="L1557" title="All 2 branches missed.">        if (largeRequestThreshold == -1) {</span>
+<span class="nc" id="L1558">            return false;</span>
+        }
+<span class="nc bnc" id="L1560" title="All 2 branches missed.">        return length &gt; largeRequestThreshold;</span>
+    }
+
+    public boolean checkRequestSizeWhenReceivingMessage(int length) throws IOException {
+<span class="nc bnc" id="L1564" title="All 2 branches missed.">        if (!isLargeRequest(length)) {</span>
+<span class="nc" id="L1565">            return true;</span>
+        }
+<span class="nc bnc" id="L1567" title="All 2 branches missed.">        if (currentLargeRequestBytes.get() + length &lt;= largeRequestMaxBytes) {</span>
+<span class="nc" id="L1568">            return true;</span>
+        } else {
+<span class="nc" id="L1570">            ServerMetrics.getMetrics().LARGE_REQUESTS_REJECTED.add(1);</span>
+<span class="nc" id="L1571">            throw new IOException(&quot;Rejecting large request&quot;);</span>
+        }
+
+    }
+
+    private boolean checkRequestSizeWhenMessageReceived(int length) throws IOException {
+<span class="nc bnc" id="L1577" title="All 2 branches missed.">        if (!isLargeRequest(length)) {</span>
+<span class="nc" id="L1578">            return true;</span>
+        }
+
+<span class="nc" id="L1581">        int bytes = currentLargeRequestBytes.addAndGet(length);</span>
+<span class="nc bnc" id="L1582" title="All 2 branches missed.">        if (bytes &gt; largeRequestMaxBytes) {</span>
+<span class="nc" id="L1583">            currentLargeRequestBytes.addAndGet(-length);</span>
+<span class="nc" id="L1584">            ServerMetrics.getMetrics().LARGE_REQUESTS_REJECTED.add(1);</span>
+<span class="nc" id="L1585">            throw new IOException(&quot;Rejecting large request&quot;);</span>
+        }
+<span class="nc" id="L1587">        return true;</span>
+    }
+
+    public void requestFinished(Request request) {
+<span class="nc" id="L1591">        int largeRequestLength = request.getLargeRequestSize();</span>
+<span class="nc bnc" id="L1592" title="All 2 branches missed.">        if (largeRequestLength != -1) {</span>
+<span class="nc" id="L1593">            currentLargeRequestBytes.addAndGet(-largeRequestLength);</span>
+        }
+<span class="nc" id="L1595">    }</span>
+
+    public void processPacket(ServerCnxn cnxn, ByteBuffer incomingBuffer) throws IOException {
+        // We have the request, now process and setup for next
+<span class="nc" id="L1599">        InputStream bais = new ByteBufferInputStream(incomingBuffer);</span>
+<span class="nc" id="L1600">        BinaryInputArchive bia = BinaryInputArchive.getArchive(bais);</span>
+<span class="nc" id="L1601">        RequestHeader h = new RequestHeader();</span>
+<span class="nc" id="L1602">        h.deserialize(bia, &quot;header&quot;);</span>
+
+        // Need to increase the outstanding request count first, otherwise
+        // there might be a race condition that it enabled recv after
+        // processing request and then disabled when check throttling.
+        //
+        // Be aware that we're actually checking the global outstanding
+        // request before this request.
+        //
+        // It's fine if the IOException thrown before we decrease the count
+        // in cnxn, since it will close the cnxn anyway.
+<span class="nc" id="L1613">        cnxn.incrOutstandingAndCheckThrottle(h);</span>
+
+        // Through the magic of byte buffers, txn will not be
+        // pointing
+        // to the start of the txn
+<span class="nc" id="L1618">        incomingBuffer = incomingBuffer.slice();</span>
+<span class="nc bnc" id="L1619" title="All 2 branches missed.">        if (h.getType() == OpCode.auth) {</span>
+<span class="nc" id="L1620">            LOG.info(&quot;got auth packet {}&quot;, cnxn.getRemoteSocketAddress());</span>
+<span class="nc" id="L1621">            AuthPacket authPacket = new AuthPacket();</span>
+<span class="nc" id="L1622">            ByteBufferInputStream.byteBuffer2Record(incomingBuffer, authPacket);</span>
+<span class="nc" id="L1623">            String scheme = authPacket.getScheme();</span>
+<span class="nc" id="L1624">            ServerAuthenticationProvider ap = ProviderRegistry.getServerProvider(scheme);</span>
+<span class="nc" id="L1625">            Code authReturn = KeeperException.Code.AUTHFAILED;</span>
+<span class="nc bnc" id="L1626" title="All 2 branches missed.">            if (ap != null) {</span>
+                try {
+                    // handleAuthentication may close the connection, to allow the client to choose
+                    // a different server to connect to.
+<span class="nc" id="L1630">                    authReturn = ap.handleAuthentication(</span>
+                        new ServerAuthenticationProvider.ServerObjs(this, cnxn),
+<span class="nc" id="L1632">                        authPacket.getAuth());</span>
+<span class="nc" id="L1633">                } catch (RuntimeException e) {</span>
+<span class="nc" id="L1634">                    LOG.warn(&quot;Caught runtime exception from AuthenticationProvider: {}&quot;, scheme, e);</span>
+<span class="nc" id="L1635">                    authReturn = KeeperException.Code.AUTHFAILED;</span>
+<span class="nc" id="L1636">                }</span>
+            }
+<span class="nc bnc" id="L1638" title="All 2 branches missed.">            if (authReturn == KeeperException.Code.OK) {</span>
+<span class="nc" id="L1639">                LOG.info(&quot;Session 0x{}: auth success for scheme {} and address {}&quot;,</span>
+<span class="nc" id="L1640">                        Long.toHexString(cnxn.getSessionId()), scheme,</span>
+<span class="nc" id="L1641">                        cnxn.getRemoteSocketAddress());</span>
+<span class="nc" id="L1642">                ReplyHeader rh = new ReplyHeader(h.getXid(), 0, KeeperException.Code.OK.intValue());</span>
+<span class="nc" id="L1643">                cnxn.sendResponse(rh, null, null);</span>
+<span class="nc" id="L1644">            } else {</span>
+<span class="nc bnc" id="L1645" title="All 2 branches missed.">                if (ap == null) {</span>
+<span class="nc" id="L1646">                    LOG.warn(</span>
+                        &quot;No authentication provider for scheme: {} has {}&quot;,
+                        scheme,
+<span class="nc" id="L1649">                        ProviderRegistry.listProviders());</span>
+                } else {
+<span class="nc" id="L1651">                    LOG.warn(&quot;Authentication failed for scheme: {}&quot;, scheme);</span>
+                }
+                // send a response...
+<span class="nc" id="L1654">                ReplyHeader rh = new ReplyHeader(h.getXid(), 0, KeeperException.Code.AUTHFAILED.intValue());</span>
+<span class="nc" id="L1655">                cnxn.sendResponse(rh, null, null);</span>
+                // ... and close connection
+<span class="nc" id="L1657">                cnxn.sendBuffer(ServerCnxnFactory.closeConn);</span>
+<span class="nc" id="L1658">                cnxn.disableRecv();</span>
+            }
+<span class="nc" id="L1660">            return;</span>
+<span class="nc bnc" id="L1661" title="All 2 branches missed.">        } else if (h.getType() == OpCode.sasl) {</span>
+<span class="nc" id="L1662">            processSasl(incomingBuffer, cnxn, h);</span>
+        } else {
+<span class="nc bnc" id="L1664" title="All 2 branches missed.">            if (!authHelper.enforceAuthentication(cnxn, h.getXid())) {</span>
+                // Authentication enforcement is failed
+                // Already sent response to user about failure and closed the session, lets return
+<span class="nc" id="L1667">                return;</span>
+            } else {
+<span class="nc" id="L1669">                Request si = new Request(cnxn, cnxn.getSessionId(), h.getXid(), h.getType(), incomingBuffer, cnxn.getAuthInfo());</span>
+<span class="nc" id="L1670">                int length = incomingBuffer.limit();</span>
+<span class="nc bnc" id="L1671" title="All 2 branches missed.">                if (isLargeRequest(length)) {</span>
+                    // checkRequestSize will throw IOException if request is rejected
+<span class="nc" id="L1673">                    checkRequestSizeWhenMessageReceived(length);</span>
+<span class="nc" id="L1674">                    si.setLargeRequestSize(length);</span>
+                }
+<span class="nc" id="L1676">                si.setOwner(ServerCnxn.me);</span>
+<span class="nc" id="L1677">                submitRequest(si);</span>
+            }
+        }
+<span class="nc" id="L1680">    }</span>
+
+    private static boolean isSaslSuperUser(String id) {
+<span class="nc bnc" id="L1683" title="All 4 branches missed.">        if (id == null || id.isEmpty()) {</span>
+<span class="nc" id="L1684">            return false;</span>
+        }
+
+<span class="nc" id="L1687">        Properties properties = System.getProperties();</span>
+<span class="nc" id="L1688">        int prefixLen = SASL_SUPER_USER.length();</span>
+
+<span class="nc bnc" id="L1690" title="All 2 branches missed.">        for (String k : properties.stringPropertyNames()) {</span>
+<span class="nc bnc" id="L1691" title="All 2 branches missed.">            if (k.startsWith(SASL_SUPER_USER)</span>
+<span class="nc bnc" id="L1692" title="All 4 branches missed.">                &amp;&amp; (k.length() == prefixLen || k.charAt(prefixLen) == '.')) {</span>
+<span class="nc" id="L1693">                String value = properties.getProperty(k);</span>
+
+<span class="nc bnc" id="L1695" title="All 4 branches missed.">                if (value != null &amp;&amp; value.equals(id)) {</span>
+<span class="nc" id="L1696">                    return true;</span>
+                }
+            }
+<span class="nc" id="L1699">        }</span>
+
+<span class="nc" id="L1701">        return false;</span>
+    }
+
+    private static boolean shouldAllowSaslFailedClientsConnect() {
+<span class="nc" id="L1705">        return Boolean.getBoolean(ALLOW_SASL_FAILED_CLIENTS);</span>
+    }
+
+    private void processSasl(ByteBuffer incomingBuffer, ServerCnxn cnxn, RequestHeader requestHeader) throws IOException {
+<span class="nc" id="L1709">        LOG.debug(&quot;Responding to client SASL token.&quot;);</span>
+<span class="nc" id="L1710">        GetSASLRequest clientTokenRecord = new GetSASLRequest();</span>
+<span class="nc" id="L1711">        ByteBufferInputStream.byteBuffer2Record(incomingBuffer, clientTokenRecord);</span>
+<span class="nc" id="L1712">        byte[] clientToken = clientTokenRecord.getToken();</span>
+<span class="nc" id="L1713">        LOG.debug(&quot;Size of client SASL token: {}&quot;, clientToken.length);</span>
+<span class="nc" id="L1714">        byte[] responseToken = null;</span>
+        try {
+<span class="nc" id="L1716">            ZooKeeperSaslServer saslServer = cnxn.zooKeeperSaslServer;</span>
+            try {
+                // note that clientToken might be empty (clientToken.length == 0):
+                // if using the DIGEST-MD5 mechanism, clientToken will be empty at the beginning of the
+                // SASL negotiation process.
+<span class="nc" id="L1721">                responseToken = saslServer.evaluateResponse(clientToken);</span>
+<span class="nc bnc" id="L1722" title="All 2 branches missed.">                if (saslServer.isComplete()) {</span>
+<span class="nc" id="L1723">                    String authorizationID = saslServer.getAuthorizationID();</span>
+<span class="nc" id="L1724">                    LOG.info(&quot;Session 0x{}: adding SASL authorization for authorizationID: {}&quot;,</span>
+<span class="nc" id="L1725">                            Long.toHexString(cnxn.getSessionId()), authorizationID);</span>
+<span class="nc" id="L1726">                    cnxn.addAuthInfo(new Id(&quot;sasl&quot;, authorizationID));</span>
+
+<span class="nc bnc" id="L1728" title="All 2 branches missed.">                    if (isSaslSuperUser(authorizationID)) {</span>
+<span class="nc" id="L1729">                        cnxn.addAuthInfo(new Id(&quot;super&quot;, &quot;&quot;));</span>
+<span class="nc" id="L1730">                        LOG.info(</span>
+                            &quot;Session 0x{}: Authenticated Id '{}' as super user&quot;,
+<span class="nc" id="L1732">                            Long.toHexString(cnxn.getSessionId()),</span>
+                            authorizationID);
+                    }
+                }
+<span class="nc" id="L1736">            } catch (SaslException e) {</span>
+<span class="nc" id="L1737">                LOG.warn(&quot;Client {} failed to SASL authenticate: {}&quot;, cnxn.getRemoteSocketAddress(), e);</span>
+<span class="nc bnc" id="L1738" title="All 4 branches missed.">                if (shouldAllowSaslFailedClientsConnect() &amp;&amp; !authHelper.isSaslAuthRequired()) {</span>
+<span class="nc" id="L1739">                    LOG.warn(&quot;Maintaining client connection despite SASL authentication failure.&quot;);</span>
+                } else {
+                    int error;
+<span class="nc bnc" id="L1742" title="All 2 branches missed.">                    if (authHelper.isSaslAuthRequired()) {</span>
+<span class="nc" id="L1743">                        LOG.warn(</span>
+                            &quot;Closing client connection due to server requires client SASL authenticaiton,&quot;
+                                + &quot;but client SASL authentication has failed, or client is not configured with SASL &quot;
+                                + &quot;authentication.&quot;);
+<span class="nc" id="L1747">                        error = Code.SESSIONCLOSEDREQUIRESASLAUTH.intValue();</span>
+                    } else {
+<span class="nc" id="L1749">                        LOG.warn(&quot;Closing client connection due to SASL authentication failure.&quot;);</span>
+<span class="nc" id="L1750">                        error = Code.AUTHFAILED.intValue();</span>
+                    }
+
+<span class="nc" id="L1753">                    ReplyHeader replyHeader = new ReplyHeader(requestHeader.getXid(), 0, error);</span>
+<span class="nc" id="L1754">                    cnxn.sendResponse(replyHeader, new SetSASLResponse(null), &quot;response&quot;);</span>
+<span class="nc" id="L1755">                    cnxn.sendCloseSession();</span>
+<span class="nc" id="L1756">                    cnxn.disableRecv();</span>
+<span class="nc" id="L1757">                    return;</span>
+                }
+<span class="nc" id="L1759">            }</span>
+<span class="nc" id="L1760">        } catch (NullPointerException e) {</span>
+<span class="nc" id="L1761">            LOG.error(&quot;cnxn.saslServer is null: cnxn object did not initialize its saslServer properly.&quot;);</span>
+<span class="nc" id="L1762">        }</span>
+<span class="nc bnc" id="L1763" title="All 2 branches missed.">        if (responseToken != null) {</span>
+<span class="nc" id="L1764">            LOG.debug(&quot;Size of server SASL response: {}&quot;, responseToken.length);</span>
+        }
+
+<span class="nc" id="L1767">        ReplyHeader replyHeader = new ReplyHeader(requestHeader.getXid(), 0, Code.OK.intValue());</span>
+<span class="nc" id="L1768">        Record record = new SetSASLResponse(responseToken);</span>
+<span class="nc" id="L1769">        cnxn.sendResponse(replyHeader, record, &quot;response&quot;);</span>
+<span class="nc" id="L1770">    }</span>
+
+    // entry point for quorum/Learner.java
+    public ProcessTxnResult processTxn(TxnHeader hdr, Record txn) {
+<span class="nc" id="L1774">        processTxnForSessionEvents(null, hdr, txn);</span>
+<span class="nc" id="L1775">        return processTxnInDB(hdr, txn, null);</span>
+    }
+
+    // entry point for FinalRequestProcessor.java
+    public ProcessTxnResult processTxn(Request request) {
+<span class="nc" id="L1780">        TxnHeader hdr = request.getHdr();</span>
+<span class="nc" id="L1781">        processTxnForSessionEvents(request, hdr, request.getTxn());</span>
+
+<span class="nc bnc" id="L1783" title="All 2 branches missed.">        final boolean writeRequest = (hdr != null);</span>
+<span class="nc" id="L1784">        final boolean quorumRequest = request.isQuorum();</span>
+
+        // return fast w/o synchronization when we get a read
+<span class="nc bnc" id="L1787" title="All 4 branches missed.">        if (!writeRequest &amp;&amp; !quorumRequest) {</span>
+<span class="nc" id="L1788">            return new ProcessTxnResult();</span>
+        }
+<span class="nc" id="L1790">        synchronized (outstandingChanges) {</span>
+<span class="nc" id="L1791">            ProcessTxnResult rc = processTxnInDB(hdr, request.getTxn(), request.getTxnDigest());</span>
+
+            // request.hdr is set for write requests, which are the only ones
+            // that add to outstandingChanges.
+<span class="nc bnc" id="L1795" title="All 2 branches missed.">            if (writeRequest) {</span>
+<span class="nc" id="L1796">                long zxid = hdr.getZxid();</span>
+<span class="nc bnc" id="L1797" title="All 2 branches missed.">                while (!outstandingChanges.isEmpty()</span>
+<span class="nc bnc" id="L1798" title="All 2 branches missed.">                        &amp;&amp; outstandingChanges.peek().zxid &lt;= zxid) {</span>
+<span class="nc" id="L1799">                    ChangeRecord cr = outstandingChanges.remove();</span>
+<span class="nc" id="L1800">                    ServerMetrics.getMetrics().OUTSTANDING_CHANGES_REMOVED.add(1);</span>
+<span class="nc bnc" id="L1801" title="All 2 branches missed.">                    if (cr.zxid &lt; zxid) {</span>
+<span class="nc" id="L1802">                        LOG.warn(</span>
+                            &quot;Zxid outstanding 0x{} is less than current 0x{}&quot;,
+<span class="nc" id="L1804">                            Long.toHexString(cr.zxid),</span>
+<span class="nc" id="L1805">                            Long.toHexString(zxid));</span>
+                    }
+<span class="nc bnc" id="L1807" title="All 2 branches missed.">                    if (outstandingChangesForPath.get(cr.path) == cr) {</span>
+<span class="nc" id="L1808">                        outstandingChangesForPath.remove(cr.path);</span>
+                    }
+<span class="nc" id="L1810">                }</span>
+            }
+
+            // do not add non quorum packets to the queue.
+<span class="nc bnc" id="L1814" title="All 2 branches missed.">            if (quorumRequest) {</span>
+<span class="nc" id="L1815">                getZKDatabase().addCommittedProposal(request);</span>
+            }
+<span class="nc" id="L1817">            return rc;</span>
+        }
+    }
+
+    private void processTxnForSessionEvents(Request request, TxnHeader hdr, Record txn) {
+<span class="nc bnc" id="L1822" title="All 2 branches missed.">        int opCode = (request == null) ? hdr.getType() : request.type;</span>
+<span class="nc bnc" id="L1823" title="All 2 branches missed.">        long sessionId = (request == null) ? hdr.getClientId() : request.sessionId;</span>
+
+<span class="nc bnc" id="L1825" title="All 2 branches missed.">        if (opCode == OpCode.createSession) {</span>
+<span class="nc bnc" id="L1826" title="All 4 branches missed.">            if (hdr != null &amp;&amp; txn instanceof CreateSessionTxn) {</span>
+<span class="nc" id="L1827">                CreateSessionTxn cst = (CreateSessionTxn) txn;</span>
+<span class="nc" id="L1828">                sessionTracker.commitSession(sessionId, cst.getTimeOut());</span>
+<span class="nc bnc" id="L1829" title="All 4 branches missed.">            } else if (request == null || !request.isLocalSession()) {</span>
+<span class="nc" id="L1830">                LOG.warn(&quot;*****&gt;&gt;&gt;&gt;&gt; Got {} {}&quot;,  txn.getClass(), txn.toString());</span>
+            }
+<span class="nc bnc" id="L1832" title="All 2 branches missed.">        } else if (opCode == OpCode.closeSession) {</span>
+<span class="nc" id="L1833">            sessionTracker.removeSession(sessionId);</span>
+        }
+<span class="nc" id="L1835">    }</span>
+
+    private ProcessTxnResult processTxnInDB(TxnHeader hdr, Record txn, TxnDigest digest) {
+<span class="nc bnc" id="L1838" title="All 2 branches missed.">        if (hdr == null) {</span>
+<span class="nc" id="L1839">            return new ProcessTxnResult();</span>
+        } else {
+<span class="nc" id="L1841">            return getZKDatabase().processTxn(hdr, txn, digest);</span>
+        }
+    }
+
+    public Map&lt;Long, Set&lt;Long&gt;&gt; getSessionExpiryMap() {
+<span class="nc" id="L1846">        return sessionTracker.getSessionExpiryMap();</span>
+    }
+
+    /**
+     * This method is used to register the ZooKeeperServerShutdownHandler to get
+     * server's error or shutdown state change notifications.
+     * {@link ZooKeeperServerShutdownHandler#handle(State)} will be called for
+     * every server state changes {@link #setState(State)}.
+     *
+     * @param zkShutdownHandler shutdown handler
+     */
+    void registerServerShutdownHandler(ZooKeeperServerShutdownHandler zkShutdownHandler) {
+<span class="nc" id="L1858">        this.zkShutdownHandler = zkShutdownHandler;</span>
+<span class="nc" id="L1859">    }</span>
+
+    public boolean isResponseCachingEnabled() {
+<span class="nc" id="L1862">        return isResponseCachingEnabled;</span>
+    }
+
+    public void setResponseCachingEnabled(boolean isEnabled) {
+<span class="nc" id="L1866">        isResponseCachingEnabled = isEnabled;</span>
+<span class="nc" id="L1867">    }</span>
+
+    public ResponseCache getReadResponseCache() {
+<span class="nc bnc" id="L1870" title="All 2 branches missed.">        return isResponseCachingEnabled ? readResponseCache : null;</span>
+    }
+
+    public ResponseCache getGetChildrenResponseCache() {
+<span class="nc bnc" id="L1874" title="All 2 branches missed.">        return isResponseCachingEnabled ? getChildrenResponseCache : null;</span>
+    }
+
+    protected void registerMetrics() {
+<span class="nc" id="L1878">        MetricsContext rootContext = ServerMetrics.getMetrics().getMetricsProvider().getRootContext();</span>
+
+<span class="nc" id="L1880">        final ZKDatabase zkdb = this.getZKDatabase();</span>
+<span class="nc" id="L1881">        final ServerStats stats = this.serverStats();</span>
+
+<span class="nc" id="L1883">        rootContext.registerGauge(&quot;avg_latency&quot;, stats::getAvgLatency);</span>
+
+<span class="nc" id="L1885">        rootContext.registerGauge(&quot;max_latency&quot;, stats::getMaxLatency);</span>
+<span class="nc" id="L1886">        rootContext.registerGauge(&quot;min_latency&quot;, stats::getMinLatency);</span>
+
+<span class="nc" id="L1888">        rootContext.registerGauge(&quot;packets_received&quot;, stats::getPacketsReceived);</span>
+<span class="nc" id="L1889">        rootContext.registerGauge(&quot;packets_sent&quot;, stats::getPacketsSent);</span>
+<span class="nc" id="L1890">        rootContext.registerGauge(&quot;num_alive_connections&quot;, stats::getNumAliveClientConnections);</span>
+
+<span class="nc" id="L1892">        rootContext.registerGauge(&quot;outstanding_requests&quot;, stats::getOutstandingRequests);</span>
+<span class="nc" id="L1893">        rootContext.registerGauge(&quot;uptime&quot;, stats::getUptime);</span>
+
+<span class="nc" id="L1895">        rootContext.registerGauge(&quot;znode_count&quot;, zkdb::getNodeCount);</span>
+
+<span class="nc" id="L1897">        rootContext.registerGauge(&quot;watch_count&quot;, zkdb.getDataTree()::getWatchCount);</span>
+<span class="nc" id="L1898">        rootContext.registerGauge(&quot;ephemerals_count&quot;, zkdb.getDataTree()::getEphemeralsCount);</span>
+
+<span class="nc" id="L1900">        rootContext.registerGauge(&quot;approximate_data_size&quot;, zkdb.getDataTree()::cachedApproximateDataSize);</span>
+
+<span class="nc" id="L1902">        rootContext.registerGauge(&quot;global_sessions&quot;, zkdb::getSessionCount);</span>
+<span class="nc" id="L1903">        rootContext.registerGauge(&quot;local_sessions&quot;, this.getSessionTracker()::getLocalSessionCount);</span>
+
+<span class="nc" id="L1905">        OSMXBean osMbean = new OSMXBean();</span>
+<span class="nc" id="L1906">        rootContext.registerGauge(&quot;open_file_descriptor_count&quot;, osMbean::getOpenFileDescriptorCount);</span>
+<span class="nc" id="L1907">        rootContext.registerGauge(&quot;max_file_descriptor_count&quot;, osMbean::getMaxFileDescriptorCount);</span>
+<span class="nc" id="L1908">        rootContext.registerGauge(&quot;connection_drop_probability&quot;, this::getConnectionDropChance);</span>
+
+<span class="nc" id="L1910">        rootContext.registerGauge(&quot;last_client_response_size&quot;, stats.getClientResponseStats()::getLastBufferSize);</span>
+<span class="nc" id="L1911">        rootContext.registerGauge(&quot;max_client_response_size&quot;, stats.getClientResponseStats()::getMaxBufferSize);</span>
+<span class="nc" id="L1912">        rootContext.registerGauge(&quot;min_client_response_size&quot;, stats.getClientResponseStats()::getMinBufferSize);</span>
+
+<span class="nc" id="L1914">        rootContext.registerGauge(&quot;outstanding_tls_handshake&quot;, this::getOutstandingHandshakeNum);</span>
+<span class="nc" id="L1915">        rootContext.registerGauge(&quot;auth_failed_count&quot;, stats::getAuthFailedCount);</span>
+<span class="nc" id="L1916">        rootContext.registerGauge(&quot;non_mtls_remote_conn_count&quot;, stats::getNonMTLSRemoteConnCount);</span>
+<span class="nc" id="L1917">        rootContext.registerGauge(&quot;non_mtls_local_conn_count&quot;, stats::getNonMTLSLocalConnCount);</span>
+
+<span class="nc" id="L1919">        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_LIMIT_PER_NAMESPACE,</span>
+<span class="nc" id="L1920">                () -&gt; QuotaMetricsUtils.getQuotaCountLimit(zkDb.getDataTree()));</span>
+<span class="nc" id="L1921">        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_LIMIT_PER_NAMESPACE,</span>
+<span class="nc" id="L1922">                () -&gt; QuotaMetricsUtils.getQuotaBytesLimit(zkDb.getDataTree()));</span>
+<span class="nc" id="L1923">        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_USAGE_PER_NAMESPACE,</span>
+<span class="nc" id="L1924">                () -&gt; QuotaMetricsUtils.getQuotaCountUsage(zkDb.getDataTree()));</span>
+<span class="nc" id="L1925">        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_USAGE_PER_NAMESPACE,</span>
+<span class="nc" id="L1926">                () -&gt; QuotaMetricsUtils.getQuotaBytesUsage(zkDb.getDataTree()));</span>
+<span class="nc" id="L1927">    }</span>
+
+    protected void unregisterMetrics() {
+
+<span class="nc" id="L1931">        MetricsContext rootContext = ServerMetrics.getMetrics().getMetricsProvider().getRootContext();</span>
+
+<span class="nc" id="L1933">        rootContext.unregisterGauge(&quot;avg_latency&quot;);</span>
+
+<span class="nc" id="L1935">        rootContext.unregisterGauge(&quot;max_latency&quot;);</span>
+<span class="nc" id="L1936">        rootContext.unregisterGauge(&quot;min_latency&quot;);</span>
+
+<span class="nc" id="L1938">        rootContext.unregisterGauge(&quot;packets_received&quot;);</span>
+<span class="nc" id="L1939">        rootContext.unregisterGauge(&quot;packets_sent&quot;);</span>
+<span class="nc" id="L1940">        rootContext.unregisterGauge(&quot;num_alive_connections&quot;);</span>
+
+<span class="nc" id="L1942">        rootContext.unregisterGauge(&quot;outstanding_requests&quot;);</span>
+<span class="nc" id="L1943">        rootContext.unregisterGauge(&quot;uptime&quot;);</span>
+
+<span class="nc" id="L1945">        rootContext.unregisterGauge(&quot;znode_count&quot;);</span>
+
+<span class="nc" id="L1947">        rootContext.unregisterGauge(&quot;watch_count&quot;);</span>
+<span class="nc" id="L1948">        rootContext.unregisterGauge(&quot;ephemerals_count&quot;);</span>
+<span class="nc" id="L1949">        rootContext.unregisterGauge(&quot;approximate_data_size&quot;);</span>
+
+<span class="nc" id="L1951">        rootContext.unregisterGauge(&quot;global_sessions&quot;);</span>
+<span class="nc" id="L1952">        rootContext.unregisterGauge(&quot;local_sessions&quot;);</span>
+
+<span class="nc" id="L1954">        rootContext.unregisterGauge(&quot;open_file_descriptor_count&quot;);</span>
+<span class="nc" id="L1955">        rootContext.unregisterGauge(&quot;max_file_descriptor_count&quot;);</span>
+<span class="nc" id="L1956">        rootContext.unregisterGauge(&quot;connection_drop_probability&quot;);</span>
+
+<span class="nc" id="L1958">        rootContext.unregisterGauge(&quot;last_client_response_size&quot;);</span>
+<span class="nc" id="L1959">        rootContext.unregisterGauge(&quot;max_client_response_size&quot;);</span>
+<span class="nc" id="L1960">        rootContext.unregisterGauge(&quot;min_client_response_size&quot;);</span>
+
+<span class="nc" id="L1962">        rootContext.unregisterGauge(&quot;auth_failed_count&quot;);</span>
+<span class="nc" id="L1963">        rootContext.unregisterGauge(&quot;non_mtls_remote_conn_count&quot;);</span>
+<span class="nc" id="L1964">        rootContext.unregisterGauge(&quot;non_mtls_local_conn_count&quot;);</span>
+
+<span class="nc" id="L1966">        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_LIMIT_PER_NAMESPACE);</span>
+<span class="nc" id="L1967">        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_LIMIT_PER_NAMESPACE);</span>
+<span class="nc" id="L1968">        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_USAGE_PER_NAMESPACE);</span>
+<span class="nc" id="L1969">        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_USAGE_PER_NAMESPACE);</span>
+<span class="nc" id="L1970">    }</span>
+
+    /**
+     * Hook into admin server, useful to expose additional data
+     * that do not represent metrics.
+     *
+     * @param response a sink which collects the data.
+     */
+    public void dumpMonitorValues(BiConsumer&lt;String, Object&gt; response) {
+<span class="nc" id="L1979">        ServerStats stats = serverStats();</span>
+<span class="nc" id="L1980">        response.accept(&quot;version&quot;, Version.getFullVersion());</span>
+<span class="nc" id="L1981">        response.accept(&quot;server_state&quot;, stats.getServerState());</span>
+<span class="nc" id="L1982">    }</span>
+
+    /**
+     * Grant or deny authorization to an operation on a node as a function of:
+     * @param cnxn :    the server connection
+     * @param acl :     set of ACLs for the node
+     * @param perm :    the permission that the client is requesting
+     * @param ids :     the credentials supplied by the client
+     * @param path :    the ZNode path
+     * @param setAcls : for set ACL operations, the list of ACLs being set. Otherwise null.
+     */
+    public void checkACL(ServerCnxn cnxn, List&lt;ACL&gt; acl, int perm, List&lt;Id&gt; ids, String path, List&lt;ACL&gt; setAcls) throws KeeperException.NoAuthException {
+<span class="nc bnc" id="L1994" title="All 2 branches missed.">        if (skipACL) {</span>
+<span class="nc" id="L1995">            return;</span>
+        }
+
+<span class="nc" id="L1998">        LOG.debug(&quot;Permission requested: {} &quot;, perm);</span>
+<span class="nc" id="L1999">        LOG.debug(&quot;ACLs for node: {}&quot;, acl);</span>
+<span class="nc" id="L2000">        LOG.debug(&quot;Client credentials: {}&quot;, ids);</span>
+
+<span class="nc bnc" id="L2002" title="All 4 branches missed.">        if (acl == null || acl.size() == 0) {</span>
+<span class="nc" id="L2003">            return;</span>
+        }
+<span class="nc bnc" id="L2005" title="All 2 branches missed.">        for (Id authId : ids) {</span>
+<span class="nc bnc" id="L2006" title="All 2 branches missed.">            if (authId.getScheme().equals(&quot;super&quot;)) {</span>
+<span class="nc" id="L2007">                return;</span>
+            }
+<span class="nc" id="L2009">        }</span>
+<span class="nc bnc" id="L2010" title="All 2 branches missed.">        for (ACL a : acl) {</span>
+<span class="nc" id="L2011">            Id id = a.getId();</span>
+<span class="nc bnc" id="L2012" title="All 2 branches missed.">            if ((a.getPerms() &amp; perm) != 0) {</span>
+<span class="nc bnc" id="L2013" title="All 4 branches missed.">                if (id.getScheme().equals(&quot;world&quot;) &amp;&amp; id.getId().equals(&quot;anyone&quot;)) {</span>
+<span class="nc" id="L2014">                    return;</span>
+                }
+<span class="nc" id="L2016">                ServerAuthenticationProvider ap = ProviderRegistry.getServerProvider(id.getScheme());</span>
+<span class="nc bnc" id="L2017" title="All 2 branches missed.">                if (ap != null) {</span>
+<span class="nc bnc" id="L2018" title="All 2 branches missed.">                    for (Id authId : ids) {</span>
+<span class="nc bnc" id="L2019" title="All 2 branches missed.">                        if (authId.getScheme().equals(id.getScheme())</span>
+<span class="nc bnc" id="L2020" title="All 2 branches missed.">                            &amp;&amp; ap.matches(</span>
+                                new ServerAuthenticationProvider.ServerObjs(this, cnxn),
+<span class="nc" id="L2022">                                new ServerAuthenticationProvider.MatchValues(path, authId.getId(), id.getId(), perm, setAcls))) {</span>
+<span class="nc" id="L2023">                            return;</span>
+                        }
+<span class="nc" id="L2025">                    }</span>
+                }
+            }
+<span class="nc" id="L2028">        }</span>
+<span class="nc" id="L2029">        throw new KeeperException.NoAuthException();</span>
+    }
+
+    /**
+     * check a path whether exceeded the quota.
+     *
+     * @param path
+     *            the path of the node, used for the quota prefix check
+     * @param lastData
+     *            the current node data, {@code null} for none
+     * @param data
+     *            the data to be set, or {@code null} for none
+     * @param type
+     *            currently, create and setData need to check quota
+     */
+    public void checkQuota(String path, byte[] lastData, byte[] data, int type) throws KeeperException.QuotaExceededException {
+<span class="nc bnc" id="L2045" title="All 2 branches missed.">        if (!enforceQuota) {</span>
+<span class="nc" id="L2046">            return;</span>
+        }
+<span class="nc bnc" id="L2048" title="All 2 branches missed.">        long dataBytes = (data == null) ? 0 : data.length;</span>
+<span class="nc" id="L2049">        ZKDatabase zkDatabase = getZKDatabase();</span>
+<span class="nc" id="L2050">        String lastPrefix = zkDatabase.getDataTree().getMaxPrefixWithQuota(path);</span>
+<span class="nc bnc" id="L2051" title="All 2 branches missed.">        if (StringUtils.isEmpty(lastPrefix)) {</span>
+<span class="nc" id="L2052">            return;</span>
+        }
+
+<span class="nc" id="L2055">        final String namespace = PathUtils.getTopNamespace(path);</span>
+<span class="nc bnc" id="L2056" title="All 3 branches missed.">        switch (type) {</span>
+            case OpCode.create:
+<span class="nc" id="L2058">                checkQuota(lastPrefix, dataBytes, 1, namespace);</span>
+<span class="nc" id="L2059">                break;</span>
+            case OpCode.setData:
+<span class="nc bnc" id="L2061" title="All 2 branches missed.">                checkQuota(lastPrefix, dataBytes - (lastData == null ? 0 : lastData.length), 0, namespace);</span>
+<span class="nc" id="L2062">                break;</span>
+             default:
+<span class="nc" id="L2064">                 throw new IllegalArgumentException(&quot;Unsupported OpCode for checkQuota: &quot; + type);</span>
+        }
+<span class="nc" id="L2066">    }</span>
+
+    /**
+     * check a path whether exceeded the quota.
+     *
+     * @param lastPrefix
+                  the path of the node which has a quota.
+     * @param bytesDiff
+     *            the diff to be added to number of bytes
+     * @param countDiff
+     *            the diff to be added to the count
+     * @param namespace
+      *           the namespace for collecting quota exceeded errors
+     */
+    private void checkQuota(String lastPrefix, long bytesDiff, long countDiff, String namespace)
+            throws KeeperException.QuotaExceededException {
+<span class="nc" id="L2082">        LOG.debug(&quot;checkQuota: lastPrefix={}, bytesDiff={}, countDiff={}&quot;, lastPrefix, bytesDiff, countDiff);</span>
+
+        // now check the quota we set
+<span class="nc" id="L2085">        String limitNode = Quotas.limitPath(lastPrefix);</span>
+<span class="nc" id="L2086">        DataNode node = getZKDatabase().getNode(limitNode);</span>
+        StatsTrack limitStats;
+<span class="nc bnc" id="L2088" title="All 2 branches missed.">        if (node == null) {</span>
+            // should not happen
+<span class="nc" id="L2090">            LOG.error(&quot;Missing limit node for quota {}&quot;, limitNode);</span>
+<span class="nc" id="L2091">            return;</span>
+        }
+<span class="nc" id="L2093">        synchronized (node) {</span>
+<span class="nc" id="L2094">            limitStats = new StatsTrack(node.data);</span>
+<span class="nc" id="L2095">        }</span>
+        //check the quota
+<span class="nc bnc" id="L2097" title="All 6 branches missed.">        boolean checkCountQuota = countDiff != 0 &amp;&amp; (limitStats.getCount() &gt; -1 || limitStats.getCountHardLimit() &gt; -1);</span>
+<span class="nc bnc" id="L2098" title="All 6 branches missed.">        boolean checkByteQuota = bytesDiff != 0 &amp;&amp; (limitStats.getBytes() &gt; -1 || limitStats.getByteHardLimit() &gt; -1);</span>
+
+<span class="nc bnc" id="L2100" title="All 4 branches missed.">        if (!checkCountQuota &amp;&amp; !checkByteQuota) {</span>
+<span class="nc" id="L2101">            return;</span>
+        }
+
+        //check the statPath quota
+<span class="nc" id="L2105">        String statNode = Quotas.statPath(lastPrefix);</span>
+<span class="nc" id="L2106">        node = getZKDatabase().getNode(statNode);</span>
+
+        StatsTrack currentStats;
+<span class="nc bnc" id="L2109" title="All 2 branches missed.">        if (node == null) {</span>
+            // should not happen
+<span class="nc" id="L2111">            LOG.error(&quot;Missing node for stat {}&quot;, statNode);</span>
+<span class="nc" id="L2112">            return;</span>
+        }
+<span class="nc" id="L2114">        synchronized (node) {</span>
+<span class="nc" id="L2115">            currentStats = new StatsTrack(node.data);</span>
+<span class="nc" id="L2116">        }</span>
+
+        //check the Count Quota
+<span class="nc bnc" id="L2119" title="All 2 branches missed.">        if (checkCountQuota) {</span>
+<span class="nc" id="L2120">            long newCount = currentStats.getCount() + countDiff;</span>
+<span class="nc bnc" id="L2121" title="All 2 branches missed.">            boolean isCountHardLimit = limitStats.getCountHardLimit() &gt; -1;</span>
+<span class="nc bnc" id="L2122" title="All 2 branches missed.">            long countLimit = isCountHardLimit ? limitStats.getCountHardLimit() : limitStats.getCount();</span>
+
+<span class="nc bnc" id="L2124" title="All 2 branches missed.">            if (newCount &gt; countLimit) {</span>
+<span class="nc bnc" id="L2125" title="All 2 branches missed.">                String msg = &quot;Quota exceeded: &quot; + lastPrefix + &quot; [current count=&quot; + newCount + &quot;, &quot; + (isCountHardLimit ? &quot;hard&quot; : &quot;soft&quot;) + &quot;CountLimit=&quot; + countLimit + &quot;]&quot;;</span>
+<span class="nc" id="L2126">                RATE_LOGGER.rateLimitLog(msg);</span>
+<span class="nc bnc" id="L2127" title="All 2 branches missed.">                if (isCountHardLimit) {</span>
+<span class="nc" id="L2128">                    updateQuotaExceededMetrics(namespace);</span>
+<span class="nc" id="L2129">                    throw new KeeperException.QuotaExceededException(lastPrefix);</span>
+                }
+            }
+        }
+
+        //check the Byte Quota
+<span class="nc bnc" id="L2135" title="All 2 branches missed.">        if (checkByteQuota) {</span>
+<span class="nc" id="L2136">            long newBytes = currentStats.getBytes() + bytesDiff;</span>
+<span class="nc bnc" id="L2137" title="All 2 branches missed.">            boolean isByteHardLimit = limitStats.getByteHardLimit() &gt; -1;</span>
+<span class="nc bnc" id="L2138" title="All 2 branches missed.">            long byteLimit = isByteHardLimit ? limitStats.getByteHardLimit() : limitStats.getBytes();</span>
+<span class="nc bnc" id="L2139" title="All 2 branches missed.">            if (newBytes &gt; byteLimit) {</span>
+<span class="nc bnc" id="L2140" title="All 2 branches missed.">                String msg = &quot;Quota exceeded: &quot; + lastPrefix + &quot; [current bytes=&quot; + newBytes + &quot;, &quot; + (isByteHardLimit ? &quot;hard&quot; : &quot;soft&quot;) + &quot;ByteLimit=&quot; + byteLimit + &quot;]&quot;;</span>
+<span class="nc" id="L2141">                RATE_LOGGER.rateLimitLog(msg);</span>
+<span class="nc bnc" id="L2142" title="All 2 branches missed.">                if (isByteHardLimit) {</span>
+<span class="nc" id="L2143">                    updateQuotaExceededMetrics(namespace);</span>
+<span class="nc" id="L2144">                    throw new KeeperException.QuotaExceededException(lastPrefix);</span>
+                }
+            }
+        }
+<span class="nc" id="L2148">    }</span>
+
+    public static boolean isDigestEnabled() {
+<span class="fc" id="L2151">        return digestEnabled;</span>
+    }
+
+    public static void setDigestEnabled(boolean digestEnabled) {
+<span class="nc" id="L2155">        LOG.info(&quot;{} = {}&quot;, ZOOKEEPER_DIGEST_ENABLED, digestEnabled);</span>
+<span class="nc" id="L2156">        ZooKeeperServer.digestEnabled = digestEnabled;</span>
+<span class="nc" id="L2157">    }</span>
+
+    /**
+     * Trim a path to get the immediate predecessor.
+     *
+     * @param path
+     * @return
+     * @throws KeeperException.BadArgumentsException
+     */
+    private String parentPath(String path) throws KeeperException.BadArgumentsException {
+<span class="nc" id="L2167">        int lastSlash = path.lastIndexOf('/');</span>
+<span class="nc bnc" id="L2168" title="All 6 branches missed.">        if (lastSlash == -1 || path.indexOf('\0') != -1 || getZKDatabase().isSpecialPath(path)) {</span>
+<span class="nc" id="L2169">            throw new KeeperException.BadArgumentsException(path);</span>
+        }
+<span class="nc bnc" id="L2171" title="All 2 branches missed.">        return lastSlash == 0 ? &quot;/&quot; : path.substring(0, lastSlash);</span>
+    }
+
+    private String effectiveACLPath(Request request) throws KeeperException.BadArgumentsException, KeeperException.InvalidACLException {
+<span class="nc" id="L2175">        boolean mustCheckACL = false;</span>
+<span class="nc" id="L2176">        String path = null;</span>
+<span class="nc" id="L2177">        List&lt;ACL&gt; acl = null;</span>
+
+<span class="nc bnc" id="L2179" title="All 5 branches missed.">        switch (request.type) {</span>
+        case OpCode.create:
+        case OpCode.create2: {
+<span class="nc" id="L2182">            CreateRequest req = new CreateRequest();</span>
+<span class="nc bnc" id="L2183" title="All 2 branches missed.">            if (buffer2Record(request.request, req)) {</span>
+<span class="nc" id="L2184">                mustCheckACL = true;</span>
+<span class="nc" id="L2185">                acl = req.getAcl();</span>
+<span class="nc" id="L2186">                path = parentPath(req.getPath());</span>
+            }
+            break;
+        }
+        case OpCode.delete: {
+<span class="nc" id="L2191">            DeleteRequest req = new DeleteRequest();</span>
+<span class="nc bnc" id="L2192" title="All 2 branches missed.">            if (buffer2Record(request.request, req)) {</span>
+<span class="nc" id="L2193">                path = parentPath(req.getPath());</span>
+            }
+            break;
+        }
+        case OpCode.setData: {
+<span class="nc" id="L2198">            SetDataRequest req = new SetDataRequest();</span>
+<span class="nc bnc" id="L2199" title="All 2 branches missed.">            if (buffer2Record(request.request, req)) {</span>
+<span class="nc" id="L2200">                path = req.getPath();</span>
+            }
+            break;
+        }
+        case OpCode.setACL: {
+<span class="nc" id="L2205">            SetACLRequest req = new SetACLRequest();</span>
+<span class="nc bnc" id="L2206" title="All 2 branches missed.">            if (buffer2Record(request.request, req)) {</span>
+<span class="nc" id="L2207">                mustCheckACL = true;</span>
+<span class="nc" id="L2208">                acl = req.getAcl();</span>
+<span class="nc" id="L2209">                path = req.getPath();</span>
+            }
+            break;
+        }
+        }
+
+<span class="nc bnc" id="L2215" title="All 2 branches missed.">        if (mustCheckACL) {</span>
+            /* we ignore the extrapolated ACL returned by fixupACL because
+             * we only care about it being well-formed (and if it isn't, an
+             * exception will be raised).
+             */
+<span class="nc" id="L2220">            PrepRequestProcessor.fixupACL(path, request.authInfo, acl);</span>
+        }
+
+<span class="nc" id="L2223">        return path;</span>
+    }
+
+    private int effectiveACLPerms(Request request) {
+<span class="nc bnc" id="L2227" title="All 5 branches missed.">        switch (request.type) {</span>
+        case OpCode.create:
+        case OpCode.create2:
+<span class="nc" id="L2230">            return ZooDefs.Perms.CREATE;</span>
+        case OpCode.delete:
+<span class="nc" id="L2232">            return ZooDefs.Perms.DELETE;</span>
+        case OpCode.setData:
+<span class="nc" id="L2234">            return ZooDefs.Perms.WRITE;</span>
+        case OpCode.setACL:
+<span class="nc" id="L2236">            return ZooDefs.Perms.ADMIN;</span>
+        default:
+<span class="nc" id="L2238">            return ZooDefs.Perms.ALL;</span>
+        }
+    }
+
+    /**
+     * Check Write Requests for Potential Access Restrictions
+     * &lt;p/&gt;
+     * Before a request is being proposed to the quorum, lets check it
+     * against local ACLs. Non-write requests (read, session, etc.)
+     * are passed along. Invalid requests are sent a response.
+     * &lt;p/&gt;
+     * While we are at it, if the request will set an ACL: make sure it's
+     * a valid one.
+     *
+     * @param request
+     * @return true if request is permitted, false if not.
+     * @throws java.io.IOException
+     */
+    public boolean authWriteRequest(Request request) {
+        int err;
+        String pathToCheck;
+
+<span class="nc bnc" id="L2260" title="All 2 branches missed.">        if (!enableEagerACLCheck) {</span>
+<span class="nc" id="L2261">            return true;</span>
+        }
+
+<span class="nc" id="L2264">        err = KeeperException.Code.OK.intValue();</span>
+
+        try {
+<span class="nc" id="L2267">            pathToCheck = effectiveACLPath(request);</span>
+<span class="nc bnc" id="L2268" title="All 2 branches missed.">            if (pathToCheck != null) {</span>
+<span class="nc" id="L2269">                checkACL(request.cnxn, zkDb.getACL(pathToCheck, null), effectiveACLPerms(request), request.authInfo, pathToCheck, null);</span>
+            }
+<span class="nc" id="L2271">        } catch (KeeperException.NoAuthException e) {</span>
+<span class="nc" id="L2272">            LOG.debug(&quot;Request failed ACL check&quot;, e);</span>
+<span class="nc" id="L2273">            err = e.code().intValue();</span>
+<span class="nc" id="L2274">        } catch (KeeperException.InvalidACLException e) {</span>
+<span class="nc" id="L2275">            LOG.debug(&quot;Request has an invalid ACL check&quot;, e);</span>
+<span class="nc" id="L2276">            err = e.code().intValue();</span>
+<span class="nc" id="L2277">        } catch (KeeperException.NoNodeException e) {</span>
+<span class="nc" id="L2278">            LOG.debug(&quot;ACL check against non-existent node: {}&quot;, e.getMessage());</span>
+<span class="nc" id="L2279">        } catch (KeeperException.BadArgumentsException e) {</span>
+<span class="nc" id="L2280">            LOG.debug(&quot;ACL check against illegal node path: {}&quot;, e.getMessage());</span>
+<span class="nc" id="L2281">        } catch (Throwable t) {</span>
+<span class="nc" id="L2282">            LOG.error(&quot;Uncaught exception in authWriteRequest with: &quot;, t);</span>
+<span class="nc" id="L2283">            throw t;</span>
+        } finally {
+<span class="nc bnc" id="L2285" title="All 2 branches missed.">            if (err != KeeperException.Code.OK.intValue()) {</span>
+                /*  This request has a bad ACL, so we are dismissing it early. */
+<span class="nc" id="L2287">                decInProcess();</span>
+<span class="nc" id="L2288">                ReplyHeader rh = new ReplyHeader(request.cxid, 0, err);</span>
+                try {
+<span class="nc" id="L2290">                    request.cnxn.sendResponse(rh, null, null);</span>
+<span class="nc" id="L2291">                } catch (IOException e) {</span>
+<span class="nc" id="L2292">                    LOG.error(&quot;IOException : {}&quot;, e);</span>
+<span class="nc" id="L2293">                }</span>
+            }
+        }
+
+<span class="nc bnc" id="L2297" title="All 2 branches missed.">        return err == KeeperException.Code.OK.intValue();</span>
+    }
+
+    private boolean buffer2Record(ByteBuffer request, Record record) {
+<span class="nc" id="L2301">        boolean rv = false;</span>
+        try {
+<span class="nc" id="L2303">            ByteBufferInputStream.byteBuffer2Record(request, record);</span>
+<span class="nc" id="L2304">            request.rewind();</span>
+<span class="nc" id="L2305">            rv = true;</span>
+<span class="nc" id="L2306">        } catch (IOException ex) {</span>
+<span class="nc" id="L2307">        }</span>
+
+<span class="nc" id="L2309">        return rv;</span>
+    }
+
+    public int getOutstandingHandshakeNum() {
+<span class="nc bnc" id="L2313" title="All 2 branches missed.">        if (serverCnxnFactory instanceof NettyServerCnxnFactory) {</span>
+<span class="nc" id="L2314">            return ((NettyServerCnxnFactory) serverCnxnFactory).getOutstandingHandshakeNum();</span>
+        } else {
+<span class="nc" id="L2316">            return 0;</span>
+        }
+    }
+
+    public boolean isReconfigEnabled() {
+<span class="nc" id="L2321">        return this.reconfigEnabled;</span>
+    }
+
+    public ZooKeeperServerShutdownHandler getZkShutdownHandler() {
+<span class="nc" id="L2325">        return zkShutdownHandler;</span>
+    }
+
+    static void updateQuotaExceededMetrics(final String namespace) {
+<span class="nc bnc" id="L2329" title="All 2 branches missed.">        if (namespace == null) {</span>
+<span class="nc" id="L2330">            return;</span>
+        }
+<span class="nc" id="L2332">        ServerMetrics.getMetrics().QUOTA_EXCEEDED_ERROR_PER_NAMESPACE.add(namespace, 1);</span>
+<span class="nc" id="L2333">    }</span>
+}
+
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ListQuotaCommand.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.cli</a> &gt; <span class="el_source">ListQuotaCommand.java</span></div><h1>ListQuotaCommand.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.cli;
+
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.Quotas;
+import org.apache.zookeeper.StatsTrack;
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.data.Stat;
+
+/**
+ * listQuota command for cli
+ */
+public class ListQuotaCommand extends CliCommand {
+
+<span class="nc" id="L38">    private static Options options = new Options();</span>
+    private String[] args;
+
+    public ListQuotaCommand() {
+<span class="nc" id="L42">        super(&quot;listquota&quot;, &quot;path&quot;);</span>
+<span class="nc" id="L43">    }</span>
+
+    @Override
+    public CliCommand parse(String[] cmdArgs) throws CliParseException {
+<span class="nc" id="L47">        DefaultParser parser = new DefaultParser();</span>
+        CommandLine cl;
+        try {
+<span class="nc" id="L50">            cl = parser.parse(options, cmdArgs);</span>
+<span class="nc" id="L51">        } catch (ParseException ex) {</span>
+<span class="nc" id="L52">            throw new CliParseException(ex);</span>
+<span class="nc" id="L53">        }</span>
+<span class="nc" id="L54">        args = cl.getArgs();</span>
+<span class="nc bnc" id="L55" title="All 2 branches missed.">        if (args.length &lt; 2) {</span>
+<span class="nc" id="L56">            throw new CliParseException(getUsageStr());</span>
+        }
+
+<span class="nc" id="L59">        return this;</span>
+    }
+
+    @Override
+    public boolean exec() throws CliException {
+<span class="nc" id="L64">        String path = args[1];</span>
+<span class="nc" id="L65">        String absolutePath = Quotas.limitPath(path);</span>
+        try {
+<span class="nc" id="L67">            err.println(&quot;absolute path is &quot; + absolutePath);</span>
+<span class="nc" id="L68">            List&lt;StatsTrack&gt; statsTracks = listQuota(zk, path);</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">            for (int i = 0; i &lt; statsTracks.size(); i++) {</span>
+<span class="nc" id="L70">                StatsTrack st = statsTracks.get(i);</span>
+<span class="nc bnc" id="L71" title="All 2 branches missed.">                if (i == 0) {</span>
+<span class="nc" id="L72">                    out.println(&quot;Output quota for &quot; + path + &quot; &quot; + st.toString());</span>
+                } else {
+<span class="nc" id="L74">                    out.println(&quot;Output stat for &quot; + path + &quot; &quot; + st.toString());</span>
+                }
+            }
+<span class="nc" id="L77">        } catch (IllegalArgumentException ex) {</span>
+<span class="nc" id="L78">            throw new MalformedPathException(ex.getMessage());</span>
+<span class="nc" id="L79">        } catch (KeeperException.NoNodeException ne) {</span>
+<span class="nc" id="L80">            err.println(&quot;quota for &quot; + path + &quot; does not exist.&quot;);</span>
+<span class="nc" id="L81">        } catch (KeeperException | InterruptedException ex) {</span>
+<span class="nc" id="L82">            throw new CliWrapperException(ex);</span>
+<span class="nc" id="L83">        }</span>
+
+<span class="nc" id="L85">        return false;</span>
+    }
+
+    // @VisibleForTesting
+    public static List&lt;StatsTrack&gt; listQuota(ZooKeeper zk, String path) throws KeeperException, InterruptedException {
+<span class="nc" id="L90">        List&lt;StatsTrack&gt; statsTracks = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L91">        Stat stat = new Stat();</span>
+<span class="nc" id="L92">        byte[] data = zk.getData(Quotas.limitPath(path), false, stat);</span>
+<span class="nc" id="L93">        StatsTrack st = new StatsTrack(data);</span>
+<span class="nc" id="L94">        statsTracks.add(st);</span>
+
+<span class="nc" id="L96">        data = zk.getData(Quotas.statPath(path), false, stat);</span>
+<span class="nc" id="L97">        st = new StatsTrack(data);</span>
+<span class="nc" id="L98">        statsTracks.add(st);</span>
+
+<span class="nc" id="L100">        return statsTracks;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

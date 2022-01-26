@@ -1,0 +1,790 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>UnifiedServerSocket.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.server.quorum</a> &gt; <span class="el_source">UnifiedServerSocket.java</span></div><h1>UnifiedServerSocket.java</h1><pre class="source lang-java linenums">/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * &quot;License&quot;); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.zookeeper.server.quorum;
+
+import io.netty.buffer.Unpooled;
+import io.netty.handler.ssl.SslHandler;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.nio.channels.SocketChannel;
+import javax.net.ssl.SSLSocket;
+import org.apache.zookeeper.common.X509Exception;
+import org.apache.zookeeper.common.X509Util;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * A ServerSocket that can act either as a regular ServerSocket, as a SSLServerSocket, or as both, depending on
+ * the constructor parameters and on the type of client (TLS or plaintext) that connects to it.
+ * The constructors have the same signature as constructors of ServerSocket, with the addition of two parameters
+ * at the beginning:
+ * &lt;ul&gt;
+ *     &lt;li&gt;X509Util - provides the SSL context to construct a secure socket when a client connects with TLS.&lt;/li&gt;
+ *     &lt;li&gt;boolean allowInsecureConnection - when true, acts as a hybrid server socket (plaintext / TLS). When
+ *         false, acts as a SSLServerSocket (rejects plaintext connections).&lt;/li&gt;
+ * &lt;/ul&gt;
+ * The &lt;code&gt;!allowInsecureConnection&lt;/code&gt; mode is needed so we can update the SSLContext (in particular, the
+ * key store and/or trust store) without having to re-create the server socket. By starting with a plaintext socket
+ * and delaying the upgrade to TLS until after a client has connected and begins a handshake, we can keep the same
+ * UnifiedServerSocket instance around, and replace the default SSLContext in the provided X509Util when the key store
+ * and/or trust store file changes on disk.
+ */
+public class UnifiedServerSocket extends ServerSocket {
+
+<span class="nc" id="L57">    private static final Logger LOG = LoggerFactory.getLogger(UnifiedServerSocket.class);</span>
+
+    private X509Util x509Util;
+    private final boolean allowInsecureConnection;
+
+    /**
+     * Creates an unbound unified server socket by calling {@link ServerSocket#ServerSocket()}.
+     * Secure client connections will be upgraded to TLS once this socket detects the ClientHello message (start of a
+     * TLS handshake). Plaintext client connections will either be accepted or rejected depending on the value of
+     * the &lt;code&gt;allowInsecureConnection&lt;/code&gt; parameter.
+     * @param x509Util the X509Util that provides the SSLContext to use for secure connections.
+     * @param allowInsecureConnection if true, accept plaintext connections, otherwise close them.
+     * @throws IOException if {@link ServerSocket#ServerSocket()} throws.
+     */
+    public UnifiedServerSocket(X509Util x509Util, boolean allowInsecureConnection) throws IOException {
+<span class="nc" id="L72">        super();</span>
+<span class="nc" id="L73">        this.x509Util = x509Util;</span>
+<span class="nc" id="L74">        this.allowInsecureConnection = allowInsecureConnection;</span>
+<span class="nc" id="L75">    }</span>
+
+    /**
+     * Creates a unified server socket bound to the specified port by calling {@link ServerSocket#ServerSocket(int)}.
+     * Secure client connections will be upgraded to TLS once this socket detects the ClientHello message (start of a
+     * TLS handshake). Plaintext client connections will either be accepted or rejected depending on the value of
+     * the &lt;code&gt;allowInsecureConnection&lt;/code&gt; parameter.
+     * @param x509Util the X509Util that provides the SSLContext to use for secure connections.
+     * @param allowInsecureConnection if true, accept plaintext connections, otherwise close them.
+     * @param port the port number, or {@code 0} to use a port number that is automatically allocated.
+     * @throws IOException if {@link ServerSocket#ServerSocket(int)} throws.
+     */
+    public UnifiedServerSocket(X509Util x509Util, boolean allowInsecureConnection, int port) throws IOException {
+<span class="nc" id="L88">        super(port);</span>
+<span class="nc" id="L89">        this.x509Util = x509Util;</span>
+<span class="nc" id="L90">        this.allowInsecureConnection = allowInsecureConnection;</span>
+<span class="nc" id="L91">    }</span>
+
+    /**
+     * Creates a unified server socket bound to the specified port, with the specified backlog, by calling
+     * {@link ServerSocket#ServerSocket(int, int)}.
+     * Secure client connections will be upgraded to TLS once this socket detects the ClientHello message (start of a
+     * TLS handshake). Plaintext client connections will either be accepted or rejected depending on the value of
+     * the &lt;code&gt;allowInsecureConnection&lt;/code&gt; parameter.
+     * @param x509Util the X509Util that provides the SSLContext to use for secure connections.
+     * @param allowInsecureConnection if true, accept plaintext connections, otherwise close them.
+     * @param port the port number, or {@code 0} to use a port number that is automatically allocated.
+     * @param backlog requested maximum length of the queue of incoming connections.
+     * @throws IOException if {@link ServerSocket#ServerSocket(int, int)} throws.
+     */
+    public UnifiedServerSocket(X509Util x509Util, boolean allowInsecureConnection, int port, int backlog) throws IOException {
+<span class="nc" id="L106">        super(port, backlog);</span>
+<span class="nc" id="L107">        this.x509Util = x509Util;</span>
+<span class="nc" id="L108">        this.allowInsecureConnection = allowInsecureConnection;</span>
+<span class="nc" id="L109">    }</span>
+
+    /**
+     * Creates a unified server socket bound to the specified port, with the specified backlog, and local IP address
+     * to bind to, by calling {@link ServerSocket#ServerSocket(int, int, InetAddress)}.
+     * Secure client connections will be upgraded to TLS once this socket detects the ClientHello message (start of a
+     * TLS handshake). Plaintext client connections will either be accepted or rejected depending on the value of
+     * the &lt;code&gt;allowInsecureConnection&lt;/code&gt; parameter.
+     * @param x509Util the X509Util that provides the SSLContext to use for secure connections.
+     * @param allowInsecureConnection if true, accept plaintext connections, otherwise close them.
+     * @param port the port number, or {@code 0} to use a port number that is automatically allocated.
+     * @param backlog requested maximum length of the queue of incoming connections.
+     * @param bindAddr the local InetAddress the server will bind to.
+     * @throws IOException if {@link ServerSocket#ServerSocket(int, int, InetAddress)} throws.
+     */
+    public UnifiedServerSocket(X509Util x509Util, boolean allowInsecureConnection, int port, int backlog, InetAddress bindAddr) throws IOException {
+<span class="nc" id="L125">        super(port, backlog, bindAddr);</span>
+<span class="nc" id="L126">        this.x509Util = x509Util;</span>
+<span class="nc" id="L127">        this.allowInsecureConnection = allowInsecureConnection;</span>
+<span class="nc" id="L128">    }</span>
+
+    @Override
+    public Socket accept() throws IOException {
+<span class="nc bnc" id="L132" title="All 2 branches missed.">        if (isClosed()) {</span>
+<span class="nc" id="L133">            throw new SocketException(&quot;Socket is closed&quot;);</span>
+        }
+<span class="nc bnc" id="L135" title="All 2 branches missed.">        if (!isBound()) {</span>
+<span class="nc" id="L136">            throw new SocketException(&quot;Socket is not bound yet&quot;);</span>
+        }
+<span class="nc" id="L138">        final PrependableSocket prependableSocket = new PrependableSocket(null);</span>
+<span class="nc" id="L139">        implAccept(prependableSocket);</span>
+<span class="nc" id="L140">        return new UnifiedSocket(x509Util, allowInsecureConnection, prependableSocket);</span>
+    }
+
+    /**
+     * The result of calling accept() on a UnifiedServerSocket. This is a Socket that doesn't know if it's
+     * using plaintext or SSL/TLS at the time when it is created. Calling a method that indicates a desire to
+     * read or write from the socket will cause the socket to detect if the connected client is attempting
+     * to establish a TLS or plaintext connection. This is done by doing a blocking read of 5 bytes off the
+     * socket and checking if the bytes look like the start of a TLS ClientHello message. If it looks like
+     * the client is attempting to connect with TLS, the internal socket is upgraded to a SSLSocket. If not,
+     * any bytes read from the socket are pushed back to the input stream, and the socket continues
+     * to be treated as a plaintext socket.
+     *
+     * The methods that trigger this behavior are:
+     * &lt;ul&gt;
+     *     &lt;li&gt;{@link UnifiedSocket#getInputStream()}&lt;/li&gt;
+     *     &lt;li&gt;{@link UnifiedSocket#getOutputStream()}&lt;/li&gt;
+     *     &lt;li&gt;{@link UnifiedSocket#sendUrgentData(int)}&lt;/li&gt;
+     * &lt;/ul&gt;
+     *
+     * Calling other socket methods (i.e option setters such as {@link Socket#setTcpNoDelay(boolean)}) does
+     * not trigger mode detection.
+     *
+     * Because detecting the mode is a potentially blocking operation, it should not be done in the
+     * accepting thread. Attempting to read from or write to the socket in the accepting thread opens the
+     * caller up to a denial-of-service attack, in which a client connects and then does nothing. This would
+     * prevent any other clients from connecting. Passing the socket returned by accept() to a separate
+     * thread which handles all read and write operations protects against this DoS attack.
+     *
+     * Callers can check if the socket has been upgraded to TLS by calling {@link UnifiedSocket#isSecureSocket()},
+     * and can get the underlying SSLSocket by calling {@link UnifiedSocket#getSslSocket()}.
+     */
+    public static class UnifiedSocket extends Socket {
+
+<span class="nc" id="L174">        private enum Mode {</span>
+<span class="nc" id="L175">            UNKNOWN,</span>
+<span class="nc" id="L176">            PLAINTEXT,</span>
+<span class="nc" id="L177">            TLS</span>
+        }
+
+        private final X509Util x509Util;
+        private final boolean allowInsecureConnection;
+        private PrependableSocket prependableSocket;
+        private SSLSocket sslSocket;
+        private Mode mode;
+
+        /**
+         * Note: this constructor is intentionally private. The only intended caller is
+         * {@link UnifiedServerSocket#accept()}.
+         *
+         * @param x509Util
+         * @param allowInsecureConnection
+         * @param prependableSocket
+         */
+<span class="nc" id="L194">        private UnifiedSocket(X509Util x509Util, boolean allowInsecureConnection, PrependableSocket prependableSocket) {</span>
+<span class="nc" id="L195">            this.x509Util = x509Util;</span>
+<span class="nc" id="L196">            this.allowInsecureConnection = allowInsecureConnection;</span>
+<span class="nc" id="L197">            this.prependableSocket = prependableSocket;</span>
+<span class="nc" id="L198">            this.sslSocket = null;</span>
+<span class="nc" id="L199">            this.mode = Mode.UNKNOWN;</span>
+<span class="nc" id="L200">        }</span>
+
+        /**
+         * Returns true if the socket mode has been determined to be TLS.
+         * @return true if the mode is TLS, false if it is UNKNOWN or PLAINTEXT.
+         */
+        public boolean isSecureSocket() {
+<span class="nc bnc" id="L207" title="All 2 branches missed.">            return mode == Mode.TLS;</span>
+        }
+
+        /**
+         * Returns true if the socket mode has been determined to be PLAINTEXT.
+         * @return true if the mode is PLAINTEXT, false if it is UNKNOWN or TLS.
+         */
+        public boolean isPlaintextSocket() {
+<span class="nc bnc" id="L215" title="All 2 branches missed.">            return mode == Mode.PLAINTEXT;</span>
+        }
+
+        /**
+         * Returns true if the socket mode is not yet known.
+         * @return true if the mode is UNKNOWN, false if it is PLAINTEXT or TLS.
+         */
+        public boolean isModeKnown() {
+<span class="nc bnc" id="L223" title="All 2 branches missed.">            return mode != Mode.UNKNOWN;</span>
+        }
+
+        /**
+         * Detects the socket mode, see comments at the top of the class for more details. This operation will block
+         * for up to {@link X509Util#getSslHandshakeTimeoutMillis()} milliseconds and should not be called in the
+         * accept() thread if possible.
+         * @throws IOException
+         */
+        private void detectMode() throws IOException {
+<span class="nc" id="L233">            byte[] litmus = new byte[5];</span>
+<span class="nc" id="L234">            int oldTimeout = -1;</span>
+<span class="nc" id="L235">            int bytesRead = 0;</span>
+<span class="nc" id="L236">            int newTimeout = x509Util.getSslHandshakeTimeoutMillis();</span>
+            try {
+<span class="nc" id="L238">                oldTimeout = prependableSocket.getSoTimeout();</span>
+<span class="nc" id="L239">                prependableSocket.setSoTimeout(newTimeout);</span>
+<span class="nc" id="L240">                bytesRead = prependableSocket.getInputStream().read(litmus, 0, litmus.length);</span>
+<span class="nc" id="L241">            } catch (SocketTimeoutException e) {</span>
+                // Didn't read anything within the timeout, fallthrough and assume the connection is plaintext.
+<span class="nc" id="L243">                LOG.warn(&quot;Socket mode detection timed out after {} ms, assuming PLAINTEXT&quot;, newTimeout);</span>
+            } finally {
+                // restore socket timeout to the old value
+                try {
+<span class="nc bnc" id="L247" title="All 2 branches missed.">                    if (oldTimeout != -1) {</span>
+<span class="nc" id="L248">                        prependableSocket.setSoTimeout(oldTimeout);</span>
+                    }
+<span class="nc" id="L250">                } catch (Exception e) {</span>
+<span class="nc" id="L251">                    LOG.warn(&quot;Failed to restore old socket timeout value of {} ms&quot;, oldTimeout, e);</span>
+<span class="nc" id="L252">                }</span>
+            }
+<span class="nc bnc" id="L254" title="All 2 branches missed.">            if (bytesRead &lt; 0) { // Got a EOF right away, definitely not using TLS. Fallthrough.</span>
+<span class="nc" id="L255">                bytesRead = 0;</span>
+            }
+
+<span class="nc bnc" id="L258" title="All 4 branches missed.">            if (bytesRead == litmus.length &amp;&amp; SslHandler.isEncrypted(Unpooled.wrappedBuffer(litmus))) {</span>
+                try {
+<span class="nc" id="L260">                    sslSocket = x509Util.createSSLSocket(prependableSocket, litmus);</span>
+<span class="nc" id="L261">                } catch (X509Exception e) {</span>
+<span class="nc" id="L262">                    throw new IOException(&quot;failed to create SSL context&quot;, e);</span>
+<span class="nc" id="L263">                }</span>
+<span class="nc" id="L264">                prependableSocket = null;</span>
+<span class="nc" id="L265">                mode = Mode.TLS;</span>
+<span class="nc" id="L266">                LOG.info(</span>
+                    &quot;Accepted TLS connection from {} - {} - {}&quot;,
+<span class="nc" id="L268">                    sslSocket.getRemoteSocketAddress(),</span>
+<span class="nc" id="L269">                    sslSocket.getSession().getProtocol(),</span>
+<span class="nc" id="L270">                    sslSocket.getSession().getCipherSuite());</span>
+<span class="nc bnc" id="L271" title="All 2 branches missed.">            } else if (allowInsecureConnection) {</span>
+<span class="nc" id="L272">                prependableSocket.prependToInputStream(litmus, 0, bytesRead);</span>
+<span class="nc" id="L273">                mode = Mode.PLAINTEXT;</span>
+<span class="nc" id="L274">                LOG.info(&quot;Accepted plaintext connection from {}&quot;, prependableSocket.getRemoteSocketAddress());</span>
+            } else {
+<span class="nc" id="L276">                prependableSocket.close();</span>
+<span class="nc" id="L277">                mode = Mode.PLAINTEXT;</span>
+<span class="nc" id="L278">                throw new IOException(&quot;Blocked insecure connection attempt&quot;);</span>
+            }
+<span class="nc" id="L280">        }</span>
+
+        private Socket getSocketAllowUnknownMode() {
+<span class="nc bnc" id="L283" title="All 2 branches missed.">            if (isSecureSocket()) {</span>
+<span class="nc" id="L284">                return sslSocket;</span>
+            } else { // Note: mode is UNKNOWN or PLAINTEXT
+<span class="nc" id="L286">                return prependableSocket;</span>
+            }
+        }
+
+        /**
+         * Returns the underlying socket, detecting the socket mode if it is not yet known. This is a potentially
+         * blocking operation and should not be called in the accept() thread.
+         * @return the underlying socket, after the socket mode has been determined.
+         * @throws IOException
+         */
+        private Socket getSocket() throws IOException {
+<span class="nc bnc" id="L297" title="All 2 branches missed.">            if (!isModeKnown()) {</span>
+<span class="nc" id="L298">                detectMode();</span>
+            }
+<span class="nc bnc" id="L300" title="All 2 branches missed.">            if (mode == Mode.TLS) {</span>
+<span class="nc" id="L301">                return sslSocket;</span>
+            } else {
+<span class="nc" id="L303">                return prependableSocket;</span>
+            }
+        }
+
+        /**
+         * Returns the underlying SSLSocket if the mode is TLS. If the mode is UNKNOWN, causes mode detection which is a
+         * potentially blocking operation. If the mode ends up being PLAINTEXT, this will throw a SocketException, so
+         * callers are advised to only call this method after checking that {@link UnifiedSocket#isSecureSocket()}
+         * returned true.
+         * @return the underlying SSLSocket if the mode is known to be TLS.
+         * @throws IOException if detecting the socket mode fails
+         * @throws SocketException if the mode is PLAINTEXT.
+         */
+        public SSLSocket getSslSocket() throws IOException {
+<span class="nc bnc" id="L317" title="All 2 branches missed.">            if (!isModeKnown()) {</span>
+<span class="nc" id="L318">                detectMode();</span>
+            }
+<span class="nc bnc" id="L320" title="All 2 branches missed.">            if (!isSecureSocket()) {</span>
+<span class="nc" id="L321">                throw new SocketException(&quot;Socket mode is not TLS&quot;);</span>
+            }
+<span class="nc" id="L323">            return sslSocket;</span>
+        }
+
+        /**
+         * See {@link Socket#connect(SocketAddress)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void connect(SocketAddress endpoint) throws IOException {
+<span class="nc" id="L331">            getSocketAllowUnknownMode().connect(endpoint);</span>
+<span class="nc" id="L332">        }</span>
+
+        /**
+         * See {@link Socket#connect(SocketAddress, int)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void connect(SocketAddress endpoint, int timeout) throws IOException {
+<span class="nc" id="L339">            getSocketAllowUnknownMode().connect(endpoint, timeout);</span>
+<span class="nc" id="L340">        }</span>
+
+        /**
+         * See {@link Socket#bind(SocketAddress)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void bind(SocketAddress bindpoint) throws IOException {
+<span class="nc" id="L347">            getSocketAllowUnknownMode().bind(bindpoint);</span>
+<span class="nc" id="L348">        }</span>
+
+        /**
+         * See {@link Socket#getInetAddress()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public InetAddress getInetAddress() {
+<span class="nc" id="L355">            return getSocketAllowUnknownMode().getInetAddress();</span>
+        }
+
+        /**
+         * See {@link Socket#getLocalAddress()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public InetAddress getLocalAddress() {
+<span class="nc" id="L363">            return getSocketAllowUnknownMode().getLocalAddress();</span>
+        }
+
+        /**
+         * See {@link Socket#getPort()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public int getPort() {
+<span class="nc" id="L371">            return getSocketAllowUnknownMode().getPort();</span>
+        }
+
+        /**
+         * See {@link Socket#getLocalPort()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public int getLocalPort() {
+<span class="nc" id="L379">            return getSocketAllowUnknownMode().getLocalPort();</span>
+        }
+
+        /**
+         * See {@link Socket#getRemoteSocketAddress()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public SocketAddress getRemoteSocketAddress() {
+<span class="nc" id="L387">            return getSocketAllowUnknownMode().getRemoteSocketAddress();</span>
+        }
+
+        /**
+         * See {@link Socket#getLocalSocketAddress()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public SocketAddress getLocalSocketAddress() {
+<span class="nc" id="L395">            return getSocketAllowUnknownMode().getLocalSocketAddress();</span>
+        }
+
+        /**
+         * See {@link Socket#getChannel()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public SocketChannel getChannel() {
+<span class="nc" id="L403">            return getSocketAllowUnknownMode().getChannel();</span>
+        }
+
+        /**
+         * See {@link Socket#getInputStream()}. If the socket mode has not yet been detected, the first read from the
+         * returned input stream will trigger mode detection, which is a potentially blocking operation. This means
+         * the accept() thread should avoid reading from this input stream if possible.
+         */
+        @Override
+        public InputStream getInputStream() throws IOException {
+<span class="nc" id="L413">            return new UnifiedInputStream(this);</span>
+        }
+
+        /**
+         * See {@link Socket#getOutputStream()}. If the socket mode has not yet been detected, the first read from the
+         * returned input stream will trigger mode detection, which is a potentially blocking operation. This means
+         * the accept() thread should avoid reading from this input stream if possible.
+         */
+        @Override
+        public OutputStream getOutputStream() throws IOException {
+<span class="nc" id="L423">            return new UnifiedOutputStream(this);</span>
+        }
+
+        /**
+         * See {@link Socket#setTcpNoDelay(boolean)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void setTcpNoDelay(boolean on) throws SocketException {
+<span class="nc" id="L431">            getSocketAllowUnknownMode().setTcpNoDelay(on);</span>
+<span class="nc" id="L432">        }</span>
+
+        /**
+         * See {@link Socket#getTcpNoDelay()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean getTcpNoDelay() throws SocketException {
+<span class="nc" id="L439">            return getSocketAllowUnknownMode().getTcpNoDelay();</span>
+        }
+
+        /**
+         * See {@link Socket#setSoLinger(boolean, int)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void setSoLinger(boolean on, int linger) throws SocketException {
+<span class="nc" id="L447">            getSocketAllowUnknownMode().setSoLinger(on, linger);</span>
+<span class="nc" id="L448">        }</span>
+
+        /**
+         * See {@link Socket#getSoLinger()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public int getSoLinger() throws SocketException {
+<span class="nc" id="L455">            return getSocketAllowUnknownMode().getSoLinger();</span>
+        }
+
+        /**
+         * See {@link Socket#sendUrgentData(int)}. Calling this method triggers mode detection, which is a potentially
+         * blocking operation, so it should not be done in the accept() thread.
+         */
+        @Override
+        public void sendUrgentData(int data) throws IOException {
+<span class="nc" id="L464">            getSocket().sendUrgentData(data);</span>
+<span class="nc" id="L465">        }</span>
+
+        /**
+         * See {@link Socket#setOOBInline(boolean)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void setOOBInline(boolean on) throws SocketException {
+<span class="nc" id="L472">            getSocketAllowUnknownMode().setOOBInline(on);</span>
+<span class="nc" id="L473">        }</span>
+
+        /**
+         * See {@link Socket#getOOBInline()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean getOOBInline() throws SocketException {
+<span class="nc" id="L480">            return getSocketAllowUnknownMode().getOOBInline();</span>
+        }
+
+        /**
+         * See {@link Socket#setSoTimeout(int)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized void setSoTimeout(int timeout) throws SocketException {
+<span class="nc" id="L488">            getSocketAllowUnknownMode().setSoTimeout(timeout);</span>
+<span class="nc" id="L489">        }</span>
+
+        /**
+         * See {@link Socket#getSoTimeout()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized int getSoTimeout() throws SocketException {
+<span class="nc" id="L496">            return getSocketAllowUnknownMode().getSoTimeout();</span>
+        }
+
+        /**
+         * See {@link Socket#setSendBufferSize(int)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized void setSendBufferSize(int size) throws SocketException {
+<span class="nc" id="L504">            getSocketAllowUnknownMode().setSendBufferSize(size);</span>
+<span class="nc" id="L505">        }</span>
+
+        /**
+         * See {@link Socket#getSendBufferSize()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized int getSendBufferSize() throws SocketException {
+<span class="nc" id="L512">            return getSocketAllowUnknownMode().getSendBufferSize();</span>
+        }
+
+        /**
+         * See {@link Socket#setReceiveBufferSize(int)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized void setReceiveBufferSize(int size) throws SocketException {
+<span class="nc" id="L520">            getSocketAllowUnknownMode().setReceiveBufferSize(size);</span>
+<span class="nc" id="L521">        }</span>
+
+        /**
+         * See {@link Socket#getReceiveBufferSize()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized int getReceiveBufferSize() throws SocketException {
+<span class="nc" id="L528">            return getSocketAllowUnknownMode().getReceiveBufferSize();</span>
+        }
+
+        /**
+         * See {@link Socket#setKeepAlive(boolean)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void setKeepAlive(boolean on) throws SocketException {
+<span class="nc" id="L536">            getSocketAllowUnknownMode().setKeepAlive(on);</span>
+<span class="nc" id="L537">        }</span>
+
+        /**
+         * See {@link Socket#getKeepAlive()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean getKeepAlive() throws SocketException {
+<span class="nc" id="L544">            return getSocketAllowUnknownMode().getKeepAlive();</span>
+        }
+
+        /**
+         * See {@link Socket#setTrafficClass(int)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void setTrafficClass(int tc) throws SocketException {
+<span class="nc" id="L552">            getSocketAllowUnknownMode().setTrafficClass(tc);</span>
+<span class="nc" id="L553">        }</span>
+
+        /**
+         * See {@link Socket#getTrafficClass()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public int getTrafficClass() throws SocketException {
+<span class="nc" id="L560">            return getSocketAllowUnknownMode().getTrafficClass();</span>
+        }
+
+        /**
+         * See {@link Socket#setReuseAddress(boolean)}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void setReuseAddress(boolean on) throws SocketException {
+<span class="nc" id="L568">            getSocketAllowUnknownMode().setReuseAddress(on);</span>
+<span class="nc" id="L569">        }</span>
+
+        /**
+         * See {@link Socket#getReuseAddress()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean getReuseAddress() throws SocketException {
+<span class="nc" id="L576">            return getSocketAllowUnknownMode().getReuseAddress();</span>
+        }
+
+        /**
+         * See {@link Socket#close()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public synchronized void close() throws IOException {
+<span class="nc" id="L584">            getSocketAllowUnknownMode().close();</span>
+<span class="nc" id="L585">        }</span>
+
+        /**
+         * See {@link Socket#shutdownInput()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void shutdownInput() throws IOException {
+<span class="nc" id="L592">            getSocketAllowUnknownMode().shutdownInput();</span>
+<span class="nc" id="L593">        }</span>
+
+        /**
+         * See {@link Socket#shutdownOutput()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public void shutdownOutput() throws IOException {
+<span class="nc" id="L600">            getSocketAllowUnknownMode().shutdownOutput();</span>
+<span class="nc" id="L601">        }</span>
+
+        /**
+         * See {@link Socket#toString()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public String toString() {
+<span class="nc" id="L608">            return &quot;UnifiedSocket[mode=&quot; + mode.toString() + &quot;socket=&quot; + getSocketAllowUnknownMode().toString() + &quot;]&quot;;</span>
+        }
+
+        /**
+         * See {@link Socket#isConnected()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean isConnected() {
+<span class="nc" id="L616">            return getSocketAllowUnknownMode().isConnected();</span>
+        }
+
+        /**
+         * See {@link Socket#isBound()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean isBound() {
+<span class="nc" id="L624">            return getSocketAllowUnknownMode().isBound();</span>
+        }
+
+        /**
+         * See {@link Socket#isClosed()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean isClosed() {
+<span class="nc" id="L632">            return getSocketAllowUnknownMode().isClosed();</span>
+        }
+
+        /**
+         * See {@link Socket#isInputShutdown()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean isInputShutdown() {
+<span class="nc" id="L640">            return getSocketAllowUnknownMode().isInputShutdown();</span>
+        }
+
+        /**
+         * See {@link Socket#isOutputShutdown()}. Calling this method does not trigger mode detection.
+         */
+        @Override
+        public boolean isOutputShutdown() {
+<span class="nc" id="L648">            return getSocketAllowUnknownMode().isOutputShutdown();</span>
+        }
+
+        /**
+         * See {@link Socket#setPerformancePreferences(int, int, int)}. Calling this method does not trigger
+         * mode detection.
+         */
+        @Override
+        public void setPerformancePreferences(int connectionTime, int latency, int bandwidth) {
+<span class="nc" id="L657">            getSocketAllowUnknownMode().setPerformancePreferences(connectionTime, latency, bandwidth);</span>
+<span class="nc" id="L658">        }</span>
+
+    }
+
+    /**
+     * An input stream for a UnifiedSocket. The first read from this stream will trigger mode detection on the
+     * underlying UnifiedSocket.
+     */
+    private static class UnifiedInputStream extends InputStream {
+
+        private final UnifiedSocket unifiedSocket;
+        private InputStream realInputStream;
+
+<span class="nc" id="L671">        private UnifiedInputStream(UnifiedSocket unifiedSocket) {</span>
+<span class="nc" id="L672">            this.unifiedSocket = unifiedSocket;</span>
+<span class="nc" id="L673">            this.realInputStream = null;</span>
+<span class="nc" id="L674">        }</span>
+
+        @Override
+        public int read() throws IOException {
+<span class="nc" id="L678">            return getRealInputStream().read();</span>
+        }
+
+        /**
+         * Note: SocketInputStream has optimized implementations of bulk-read operations, so we need to call them
+         * directly instead of relying on the base-class implementation which just calls the single-byte read() over
+         * and over. Not implementing these results in awful performance.
+         */
+        @Override
+        public int read(byte[] b) throws IOException {
+<span class="nc" id="L688">            return getRealInputStream().read(b);</span>
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+<span class="nc" id="L693">            return getRealInputStream().read(b, off, len);</span>
+        }
+
+        private InputStream getRealInputStream() throws IOException {
+<span class="nc bnc" id="L697" title="All 2 branches missed.">            if (realInputStream == null) {</span>
+                // Note: The first call to getSocket() triggers mode detection which can block
+<span class="nc" id="L699">                realInputStream = unifiedSocket.getSocket().getInputStream();</span>
+            }
+<span class="nc" id="L701">            return realInputStream;</span>
+        }
+
+        @Override
+        public long skip(long n) throws IOException {
+<span class="nc" id="L706">            return getRealInputStream().skip(n);</span>
+        }
+
+        @Override
+        public int available() throws IOException {
+<span class="nc" id="L711">            return getRealInputStream().available();</span>
+        }
+
+        @Override
+        public void close() throws IOException {
+<span class="nc" id="L716">            getRealInputStream().close();</span>
+<span class="nc" id="L717">        }</span>
+
+        @Override
+        public synchronized void mark(int readlimit) {
+            try {
+<span class="nc" id="L722">                getRealInputStream().mark(readlimit);</span>
+<span class="nc" id="L723">            } catch (IOException e) {</span>
+<span class="nc" id="L724">                throw new RuntimeException(e);</span>
+<span class="nc" id="L725">            }</span>
+<span class="nc" id="L726">        }</span>
+
+        @Override
+        public synchronized void reset() throws IOException {
+<span class="nc" id="L730">            getRealInputStream().reset();</span>
+<span class="nc" id="L731">        }</span>
+
+        @Override
+        public boolean markSupported() {
+            try {
+<span class="nc" id="L736">                return getRealInputStream().markSupported();</span>
+<span class="nc" id="L737">            } catch (IOException e) {</span>
+<span class="nc" id="L738">                throw new RuntimeException(e);</span>
+            }
+        }
+
+    }
+
+    private static class UnifiedOutputStream extends OutputStream {
+
+        private final UnifiedSocket unifiedSocket;
+        private OutputStream realOutputStream;
+
+<span class="nc" id="L749">        private UnifiedOutputStream(UnifiedSocket unifiedSocket) {</span>
+<span class="nc" id="L750">            this.unifiedSocket = unifiedSocket;</span>
+<span class="nc" id="L751">            this.realOutputStream = null;</span>
+<span class="nc" id="L752">        }</span>
+
+        @Override
+        public void write(int b) throws IOException {
+<span class="nc" id="L756">            getRealOutputStream().write(b);</span>
+<span class="nc" id="L757">        }</span>
+
+        @Override
+        public void write(byte[] b) throws IOException {
+<span class="nc" id="L761">            getRealOutputStream().write(b);</span>
+<span class="nc" id="L762">        }</span>
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+<span class="nc" id="L766">            getRealOutputStream().write(b, off, len);</span>
+<span class="nc" id="L767">        }</span>
+
+        @Override
+        public void flush() throws IOException {
+<span class="nc" id="L771">            getRealOutputStream().flush();</span>
+<span class="nc" id="L772">        }</span>
+
+        @Override
+        public void close() throws IOException {
+<span class="nc" id="L776">            getRealOutputStream().close();</span>
+<span class="nc" id="L777">        }</span>
+
+        private OutputStream getRealOutputStream() throws IOException {
+<span class="nc bnc" id="L780" title="All 2 branches missed.">            if (realOutputStream == null) {</span>
+                // Note: The first call to getSocket() triggers mode detection which can block
+<span class="nc" id="L782">                realOutputStream = unifiedSocket.getSocket().getOutputStream();</span>
+            }
+<span class="nc" id="L784">            return realOutputStream;</span>
+        }
+
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>

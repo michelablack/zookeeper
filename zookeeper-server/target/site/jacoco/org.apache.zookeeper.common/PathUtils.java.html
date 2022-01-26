@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="it"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PathUtils.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Apache ZooKeeper - Server</a> &gt; <a href="index.source.html" class="el_package">org.apache.zookeeper.common</a> &gt; <span class="el_source">PathUtils.java</span></div><h1>PathUtils.java</h1><pre class="source lang-java linenums"> /*
+  * Licensed to the Apache Software Foundation (ASF) under one
+  * or more contributor license agreements.  See the NOTICE file
+  * distributed with this work for additional information
+  * regarding copyright ownership.  The ASF licenses this file
+  * to you under the Apache License, Version 2.0 (the
+  * &quot;License&quot;); you may not use this file except in compliance
+  * with the License.  You may obtain a copy of the License at
+  *
+  *     http://www.apache.org/licenses/LICENSE-2.0
+  *
+  * Unless required by applicable law or agreed to in writing, software
+  * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+
+ package org.apache.zookeeper.common;
+
+ /**
+  * Path related utilities
+  */
+<span class="nc" id="L24"> public class PathUtils {</span>
+
+     /** validate the provided znode path string
+      * @param path znode path string
+      * @param isSequential if the path is being created
+      * with a sequential flag
+      * @throws IllegalArgumentException if the path is invalid
+      */
+     public static void validatePath(String path, boolean isSequential) throws IllegalArgumentException {
+<span class="nc bnc" id="L33" title="All 2 branches missed.">         validatePath(isSequential ? path + &quot;1&quot; : path);</span>
+<span class="nc" id="L34">     }</span>
+
+     /**
+      * Validate the provided znode path string
+      * @param path znode path string
+      * @throws IllegalArgumentException if the path is invalid
+      */
+     public static void validatePath(String path) throws IllegalArgumentException {
+<span class="pc bpc" id="L42" title="1 of 2 branches missed.">         if (path == null) {</span>
+<span class="nc" id="L43">             throw new IllegalArgumentException(&quot;Path cannot be null&quot;);</span>
+         }
+<span class="pc bpc" id="L45" title="1 of 2 branches missed.">         if (path.length() == 0) {</span>
+<span class="nc" id="L46">             throw new IllegalArgumentException(&quot;Path length must be &gt; 0&quot;);</span>
+         }
+<span class="pc bpc" id="L48" title="1 of 2 branches missed.">         if (path.charAt(0) != '/') {</span>
+<span class="nc" id="L49">             throw new IllegalArgumentException(&quot;Path must start with / character&quot;);</span>
+         }
+<span class="fc bfc" id="L51" title="All 2 branches covered.">         if (path.length() == 1) { // done checking - it's the root</span>
+<span class="fc" id="L52">             return;</span>
+         }
+<span class="pc bpc" id="L54" title="1 of 2 branches missed.">         if (path.charAt(path.length() - 1) == '/') {</span>
+<span class="nc" id="L55">             throw new IllegalArgumentException(&quot;Path must not end with / character&quot;);</span>
+         }
+
+<span class="fc" id="L58">         String reason = null;</span>
+<span class="fc" id="L59">         char lastc = '/';</span>
+<span class="fc" id="L60">         char[] chars = path.toCharArray();</span>
+         char c;
+<span class="fc bfc" id="L62" title="All 2 branches covered.">         for (int i = 1; i &lt; chars.length; lastc = chars[i], i++) {</span>
+<span class="fc" id="L63">             c = chars[i];</span>
+
+<span class="pc bpc" id="L65" title="1 of 2 branches missed.">             if (c == 0) {</span>
+<span class="nc" id="L66">                 reason = &quot;null character not allowed @&quot; + i;</span>
+<span class="nc" id="L67">                 break;</span>
+<span class="pc bpc" id="L68" title="3 of 4 branches missed.">             } else if (c == '/' &amp;&amp; lastc == '/') {</span>
+<span class="nc" id="L69">                 reason = &quot;empty node name specified @&quot; + i;</span>
+<span class="nc" id="L70">                 break;</span>
+<span class="pc bpc" id="L71" title="1 of 4 branches missed.">             } else if (c == '.' &amp;&amp; lastc == '.') {</span>
+<span class="nc bnc" id="L72" title="All 6 branches missed.">                 if (chars[i - 2] == '/' &amp;&amp; ((i + 1 == chars.length) || chars[i + 1] == '/')) {</span>
+<span class="nc" id="L73">                     reason = &quot;relative paths not allowed @&quot; + i;</span>
+<span class="nc" id="L74">                     break;</span>
+                 }
+<span class="fc bfc" id="L76" title="All 2 branches covered.">             } else if (c == '.') {</span>
+<span class="pc bpc" id="L77" title="4 of 6 branches missed.">                 if (chars[i - 1] == '/' &amp;&amp; ((i + 1 == chars.length) || chars[i + 1] == '/')) {</span>
+<span class="fc" id="L78">                     reason = &quot;relative paths not allowed @&quot; + i;</span>
+<span class="fc" id="L79">                     break;</span>
+                 }
+<span class="pc bpc" id="L81" title="7 of 16 branches missed.">             } else if (c &gt; '\u0000' &amp;&amp; c &lt;= '\u001f'</span>
+                        || c &gt;= '\u007f' &amp;&amp; c &lt;= '\u009F'
+                        || c &gt;= '\ud800' &amp;&amp; c &lt;= '\uf8ff'
+                        || c &gt;= '\ufff0' &amp;&amp; c &lt;= '\uffff') {
+<span class="fc" id="L85">                 reason = &quot;invalid character @&quot; + i;</span>
+<span class="fc" id="L86">                 break;</span>
+             }
+         }
+
+<span class="fc bfc" id="L90" title="All 2 branches covered.">         if (reason != null) {</span>
+<span class="fc" id="L91">             throw new IllegalArgumentException(&quot;Invalid path string \&quot;&quot; + path + &quot;\&quot; caused by &quot; + reason);</span>
+         }
+<span class="fc" id="L93">     }</span>
+
+     /**
+      * Convert Windows path to Unix
+      *
+      * @param path
+      *            file path
+      * @return converted file path
+      */
+     public static String normalizeFileSystemPath(String path) {
+<span class="nc bnc" id="L103" title="All 2 branches missed.">         if (path != null) {</span>
+<span class="nc" id="L104">             String osname = java.lang.System.getProperty(&quot;os.name&quot;);</span>
+<span class="nc bnc" id="L105" title="All 2 branches missed.">             if (osname.toLowerCase().contains(&quot;windows&quot;)) {</span>
+<span class="nc" id="L106">                 return path.replace('\\', '/');</span>
+             }
+         }
+<span class="nc" id="L109">         return path;</span>
+     }
+
+     /**
+      * return the top namespace of a znode path
+      *
+      * @param path znode path string
+      *
+      * @return the top namespace. If not exist, return null
+      */
+     public static String getTopNamespace(final String path) {
+<span class="nc bnc" id="L120" title="All 2 branches missed.">         if (path == null) {</span>
+<span class="nc" id="L121">             return null;</span>
+         }
+<span class="nc" id="L123">         final String[] parts = path.split(&quot;/&quot;);</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">         return parts.length &gt; 1 ? parts[1] : null;</span>
+     }
+ }
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.7.202105040129</span></div></body></html>
