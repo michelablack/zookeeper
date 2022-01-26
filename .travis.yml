@@ -11,4 +11,4 @@ addons:
 
 script:  
   # the following command line builds the project, runs the tests with coverage and then execute the SonarCloud analysis
-  - mvn clean test sonar:sonar -Dsonar.projectKey=michelablack_zookeeper-isw2
+  - mvn test jacoco:prepare-agent jacoco:report -Dcoverage=true sonar:sonar -Drat.skip=true -Dsonar.projectKey=michelablack_zookeeper-isw2
