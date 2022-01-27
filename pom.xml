@@ -1202,7 +1202,7 @@
     </plugins>
     <resources>
       <resource>
-        <directory>${project.basedir}src/main/java/resources</directory>
+        <directory>${project.basedir}/src/main/java/resources</directory>
         <excludes>
           <exclude>**/*.*</exclude>
         </excludes>
