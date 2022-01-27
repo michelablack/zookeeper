@@ -27,7 +27,7 @@ public class DataTreeBean implements DataTreeMXBean, ZKMBeanInfo {
 
     DataTree dataTree;
 
-    public DataTreeBean(DataTree dataTree) {
+    public DataTreeBean(org.apache.zookeeper.server.DataTree dataTree) {
         this.dataTree = dataTree;
     }
 

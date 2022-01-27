@@ -79,9 +79,9 @@ public class Observer extends Learner {
     /**
      * next learner master to try, when specified
      */
-    private static final AtomicReference<QuorumServer> nextLearnerMaster = new AtomicReference<>();
+    private static final AtomicReference<QuorumPeer.QuorumServer> nextLearnerMaster = new AtomicReference<>();
 
-    private QuorumServer currentLearnerMaster = null;
+    private QuorumPeer.QuorumServer currentLearnerMaster = null;
 
     Observer(QuorumPeer self, ObserverZooKeeperServer observerZooKeeperServer) {
         this.self = self;
@@ -152,13 +152,13 @@ public class Observer extends Learner {
     }
 
     private QuorumServer findLearnerMaster() {
-        QuorumServer prescribedLearnerMaster = nextLearnerMaster.getAndSet(null);
+        QuorumPeer.QuorumServer prescribedLearnerMaster = nextLearnerMaster.getAndSet(null);
         if (prescribedLearnerMaster != null
             && self.validateLearnerMaster(Long.toString(prescribedLearnerMaster.id)) == null) {
             LOG.warn("requested next learner master {} is no longer valid", prescribedLearnerMaster);
             prescribedLearnerMaster = null;
         }
-        final QuorumServer master = (prescribedLearnerMaster == null)
+        final QuorumPeer.QuorumServer master = (prescribedLearnerMaster == null)
             ? self.findLearnerMaster(findLeader())
             : prescribedLearnerMaster;
         currentLearnerMaster = master;
@@ -271,7 +271,7 @@ public class Observer extends Learner {
     }
 
     public long getLearnerMasterId() {
-        QuorumServer current = currentLearnerMaster;
+        QuorumPeer.QuorumServer current = currentLearnerMaster;
         return current == null ? -1 : current.id;
     }
 
@@ -281,7 +281,7 @@ public class Observer extends Learner {
      * fail over to the next available learner master.
      */
     public boolean setLearnerMaster(String learnerMaster) {
-        final QuorumServer server = self.validateLearnerMaster(learnerMaster);
+        final QuorumPeer.QuorumServer server = self.validateLearnerMaster(learnerMaster);
         if (server == null) {
             return false;
         } else if (server.equals(currentLearnerMaster)) {
@@ -294,7 +294,7 @@ public class Observer extends Learner {
         }
     }
 
-    public QuorumServer getCurrentLearnerMaster() {
+    public QuorumPeer.QuorumServer getCurrentLearnerMaster() {
         return currentLearnerMaster;
     }
 

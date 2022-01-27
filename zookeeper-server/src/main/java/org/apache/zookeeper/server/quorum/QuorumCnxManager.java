@@ -1446,7 +1446,7 @@ public class QuorumCnxManager {
      * waiting up to the specified wait time if necessary for an element to
      * become available.
      *
-     * {@link BlockingQueue#poll(long, TimeUnit)}
+     * {@link BlockingQueue#poll(long, java.util.concurrent.TimeUnit)}
      */
     private ByteBuffer pollSendQueue(final BlockingQueue<ByteBuffer> queue,
           final long timeout, final TimeUnit unit) throws InterruptedException {
@@ -1472,7 +1472,7 @@ public class QuorumCnxManager {
      * waiting up to the specified wait time if necessary for an element to
      * become available.
      *
-     * {@link BlockingQueue#poll(long, TimeUnit)}
+     * {@link BlockingQueue#poll(long, java.util.concurrent.TimeUnit)}
      */
     public Message pollRecvQueue(final long timeout, final TimeUnit unit)
        throws InterruptedException {

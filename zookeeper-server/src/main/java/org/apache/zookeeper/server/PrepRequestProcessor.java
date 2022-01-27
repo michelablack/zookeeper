@@ -303,7 +303,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
         int lastSlash = path.lastIndexOf('/');
         if (lastSlash == -1 || path.indexOf('\0') != -1 || failCreate) {
             LOG.info("Invalid path {} with session 0x{}", path, Long.toHexString(sessionId));
-            throw new BadArgumentsException(path);
+            throw new KeeperException.BadArgumentsException(path);
         }
         return path.substring(0, lastSlash);
     }
@@ -455,7 +455,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                     request.qv = QuorumPeerConfig.parseDynamicConfig(props, lzks.self.getElectionType(), true, false, lastSeenQV.getOraclePath());
                     request.qv.setVersion(request.getHdr().getZxid());
                 } catch (IOException | ConfigException e) {
-                    throw new BadArgumentsException(e.getMessage());
+                    throw new KeeperException.BadArgumentsException(e.getMessage());
                 }
             } else { //incremental change - must be a majority quorum system
                 LOG.info("Incremental reconfig");
@@ -475,7 +475,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                 if (!(lastSeenQV instanceof QuorumMaj) && !(lastSeenQV instanceof QuorumOracleMaj)) {
                     String msg = "Incremental reconfiguration requested but last configuration seen has a non-majority quorum system";
                     LOG.warn(msg);
-                    throw new BadArgumentsException(msg);
+                    throw new KeeperException.BadArgumentsException(msg);
                 }
                 Map<Long, QuorumServer> nextServers = new HashMap<Long, QuorumServer>(lastSeenQV.getAllMembers());
                 try {
@@ -490,13 +490,13 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                             // joiner should have the following format: server.x = server_spec;client_spec
                             String[] parts = StringUtils.split(joiner, "=").toArray(new String[0]);
                             if (parts.length != 2) {
-                                throw new BadArgumentsException("Wrong format of server string");
+                                throw new KeeperException.BadArgumentsException("Wrong format of server string");
                             }
                             // extract server id x from first part of joiner: server.x
                             Long sid = Long.parseLong(parts[0].substring(parts[0].lastIndexOf('.') + 1));
                             QuorumServer qs = new QuorumServer(sid, parts[1]);
                             if (qs.clientAddr == null || qs.electionAddr == null || qs.addr == null) {
-                                throw new BadArgumentsException("Wrong format of server string - each server should have 3 ports specified");
+                                throw new KeeperException.BadArgumentsException("Wrong format of server string - each server should have 3 ports specified");
                             }
 
                             // check duplication of addresses and ports
@@ -512,7 +512,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                         }
                     }
                 } catch (ConfigException e) {
-                    throw new BadArgumentsException("Reconfiguration failed");
+                    throw new KeeperException.BadArgumentsException("Reconfiguration failed");
                 }
 
                 if (lastSeenQV instanceof QuorumMaj) {
@@ -526,11 +526,11 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
             if (QuorumPeerConfig.isStandaloneEnabled() && request.qv.getVotingMembers().size() < 2) {
                 String msg = "Reconfig failed - new configuration must include at least 2 followers";
                 LOG.warn(msg);
-                throw new BadArgumentsException(msg);
+                throw new KeeperException.BadArgumentsException(msg);
             } else if (request.qv.getVotingMembers().size() < 1) {
                 String msg = "Reconfig failed - new configuration must include at least 1 follower";
                 LOG.warn(msg);
-                throw new BadArgumentsException(msg);
+                throw new KeeperException.BadArgumentsException(msg);
             }
 
             if (!lzks.getLeader().isQuorumSynced(request.qv)) {

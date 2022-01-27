@@ -373,7 +373,7 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
     }
 
     @Override
-    void sendPacket(Packet p) throws IOException {
+    void sendPacket(ClientCnxn.Packet p) throws IOException {
         if (channel == null) {
             throw new IOException("channel has been closed");
         }

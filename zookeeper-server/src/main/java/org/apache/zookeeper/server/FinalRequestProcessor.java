@@ -187,7 +187,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 if (request.getException() != null) {
                     throw request.getException();
                 } else {
-                    throw KeeperException.create(Code.get(((ErrorTxn) request.getTxn()).getErr()));
+                    throw KeeperException.create(KeeperException.Code.get(((ErrorTxn) request.getTxn()).getErr()));
                 }
             }
 

@@ -488,9 +488,9 @@ public class ZKDatabase {
      * @param path the path for which stat is to be done
      * @param serverCnxn the servercnxn attached to this request
      * @return the stat of this node
-     * @throws NoNodeException
+     * @throws KeeperException.NoNodeException
      */
-    public Stat statNode(String path, ServerCnxn serverCnxn) throws NoNodeException {
+    public Stat statNode(String path, ServerCnxn serverCnxn) throws KeeperException.NoNodeException {
         return dataTree.statNode(path, serverCnxn);
     }
 
@@ -508,9 +508,9 @@ public class ZKDatabase {
      * @param path the path being queried
      * @param stat the stat for this path
      * @param watcher the watcher function
-     * @throws NoNodeException
+     * @throws KeeperException.NoNodeException
      */
-    public byte[] getData(String path, Stat stat, Watcher watcher) throws NoNodeException {
+    public byte[] getData(String path, Stat stat, Watcher watcher) throws KeeperException.NoNodeException {
         return dataTree.getData(path, stat, watcher);
     }
 
@@ -560,16 +560,16 @@ public class ZKDatabase {
      * @param stat the stat of the node
      * @param watcher the watcher function for this path
      * @return the list of children for this path
-     * @throws NoNodeException
+     * @throws KeeperException.NoNodeException
      */
-    public List<String> getChildren(String path, Stat stat, Watcher watcher) throws NoNodeException {
+    public List<String> getChildren(String path, Stat stat, Watcher watcher) throws KeeperException.NoNodeException {
         return dataTree.getChildren(path, stat, watcher);
     }
 
     /*
      * get all sub-children number of this node
      * */
-    public int getAllChildrenNumber(String path) throws NoNodeException {
+    public int getAllChildrenNumber(String path) throws KeeperException.NoNodeException {
         return dataTree.getAllChildrenNumber(path);
     }
 

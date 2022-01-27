@@ -593,7 +593,7 @@ public class FileTxnLog implements TxnLog, Closeable {
      * this class implements the txnlog iterator interface
      * which is used for reading the transaction logs
      */
-    public static class FileTxnIterator implements TxnIterator {
+    public static class FileTxnIterator implements TxnLog.TxnIterator {
 
         File logDir;
         long zxid;

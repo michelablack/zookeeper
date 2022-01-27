@@ -78,7 +78,7 @@ public final class FileChangeWatcher {
     }
 
     /**
-     * Returns the current {@link State}.
+     * Returns the current {@link FileChangeWatcher.State}.
      * @return the current state.
      */
     public synchronized State getState() {

@@ -32,7 +32,7 @@
   <description>ZooKeeper server</description>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <sonar.coverage.jacoco.xmlReportPaths>${project.basedir}/../${aggregate.report.dir}</sonar.coverage.jacoco.xmlReportPaths>
+    <!--<sonar.coverage.jacoco.xmlReportPaths>${project.basedir}/../${aggregate.report.dir}</sonar.coverage.jacoco.xmlReportPaths>-->
   </properties>
 
   <dependencies>
@@ -89,7 +89,10 @@
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
     </dependency>
-
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
@@ -126,9 +129,9 @@
       <scope>provided</scope>
     </dependency>
     <dependency>
-       <groupId>io.dropwizard.metrics</groupId>
-       <artifactId>metrics-core</artifactId>
-       <scope>provided</scope>
+      <groupId>io.dropwizard.metrics</groupId>
+      <artifactId>metrics-core</artifactId>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>log4j</groupId>
@@ -159,7 +162,7 @@
       <artifactId>jmockit</artifactId>
       <scope>test</scope>
     </dependency>
-    <!--  
+    <!--
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>
@@ -186,25 +189,25 @@
       <artifactId>snappy-java</artifactId>
       <scope>provided</scope>
     </dependency>
-      <dependency>
-          <groupId>commons-io</groupId>
-          <artifactId>commons-io</artifactId>
-          <version>2.6</version>
-          <scope>compile</scope>
-      </dependency>
-	<dependency>
-		<groupId>org.apache.maven.surefire</groupId>
-		<artifactId>surefire</artifactId>
-		<version>3.0.0-M5</version>
-		<type>pom</type>
+    <dependency>
+      <groupId>commons-io</groupId>
+      <artifactId>commons-io</artifactId>
+      <version>2.6</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.maven.surefire</groupId>
+      <artifactId>surefire</artifactId>
+      <version>3.0.0-M5</version>
+      <type>pom</type>
     </dependency>
     <!-- https://mvnrepository.com/artifact/junit/junit -->
-<dependency>
-    <groupId>junit</groupId>
-    <artifactId>junit</artifactId>
-    <version>4.12</version>
-    <scope>test</scope>
-</dependency>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.12</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -286,65 +289,39 @@
           </execution>
         </executions>
       </plugin>
-          
-          <!--  
-          <forkCount>${surefire-forkcount}</forkCount>
-          <reuseForks>false</reuseForks>
-          <argLine>-Xmx512m -Dtest.junit.threads=${surefire-forkcount} -Dzookeeper.junit.threadid=${surefire.forkNumber} -javaagent:${org.jmockit:jmockit:jar}</argLine>
-          <basedir>${project.basedir}</basedir>
-          <systemPropertyVariables>
-            <build.test.dir>${project.build.directory}/surefire</build.test.dir>
-            <zookeeper.DigestAuthenticationProvider.superDigest>super:D/InIHSb7yEEbrWz8b9l71RjZJU=</zookeeper.DigestAuthenticationProvider.superDigest>
-          </systemPropertyVariables>
-        </configuration>
-      </plugin>
-      
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>publish-test-jar</id>
-            <goals>
-              <goal>test-jar</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      -->
-     </plugins>
+    </plugins>
   </build>
-  
-  <profiles>
-  	<!-- PIT profile for mutation testing -->
-    <profile>
-	  <id>PIT-zookeeper-profile</id>
-	 <activation>
-	  	<activeByDefault>true</activeByDefault>
-	  </activation>
-	  <build>
-	    <plugins>
-		  <plugin>
-		    <groupId>org.pitest</groupId>
-			<artifactId>pitest-maven</artifactId>
-    		<version>1.6.7</version>
-    		
-    		<!-- Just mutate the classes that have been tested -->
 
-    		<configuration>
-        	  <targetClasses>
-                <param>org.apache.zookeeper.ZKUtil</param>
-                <param>org.apache.zookeeper.server.persistence.FileTxnLog</param>
-        	  </targetClasses> 
-        	  <targetTests>
-                <param>org.uniroma2.it.ZKUtilTests.*</param>
-                <param>org.uniroma2.it.fileTnxLogTests.*</param>
-              </targetTests>
-    		</configuration>
- 		  </plugin>
-		</plugins>
-      </build>
-    </profile>
-  </profiles>
+  <profiles>
+  <!-- PIT profile for mutation testing -->
+  <profile>
+    <id>PIT-zookeeper-profile</id>
+    <activation>
+      <activeByDefault>true</activeByDefault>
+    </activation>
+    <build>
+      <plugins>
+        <plugin>
+          <groupId>org.pitest</groupId>
+          <artifactId>pitest-maven</artifactId>
+          <version>1.6.7</version>
+
+  <!-- Just mutate the classes that have been tested -->
+
+  <configuration>
+    <targetClasses>
+      <param>org.apache.zookeeper.ZKUtil</param>
+      <param>org.apache.zookeeper.server.persistence.FileTxnLog</param>
+    </targetClasses>
+    <targetTests>
+      <param>org.uniroma2.it.ZKUtilTests.*</param>
+      <param>org.uniroma2.it.fileTnxLogTests.*</param>
+    </targetTests>
+  </configuration>
+</plugin>
+</plugins>
+</build>
+</profile>
+</profiles>
 
 </project>
