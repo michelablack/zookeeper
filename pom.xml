@@ -65,7 +65,6 @@
     <module>zookeeper-recipes</module>
     <module>zookeeper-assembly</module>
     <module>zookeeper-compatibility-tests</module>
-    <module>zookeeper-isw2-aggregate</module>
   </modules>
 
   <scm>
@@ -344,7 +343,47 @@
         </plugins>
       </build>
     </profile>
-
+    <profile>
+      <id>isw2</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.0.0-M5</version>
+            <configuration>
+              <!-- @{argLine} is a variable injected by JaCoCo-->
+              <argLine>@{argLine} -Xmx2G -Djava.net.preferIPv4Stack=true</argLine>
+              <redirectTestOutputToFile>${redirectTestOutputToFile}</redirectTestOutputToFile>
+              <forkCount>1</forkCount>
+              <reuseForks>false</reuseForks>
+              <forkedProcessTimeoutInSeconds>1800</forkedProcessTimeoutInSeconds>
+              <!-- we want build to complete even in case of failures -->
+              <testFailureIgnore>true</testFailureIgnore>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <version>0.8.7</version>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>prepare-agent</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>report</id>
+                <phase>prepare-package</phase>
+                <goals>
+                  <goal>report</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <profile>
       <id>m2e</id>
       <activation>
@@ -507,12 +546,11 @@
     <checkstyle.version>8.39</checkstyle.version>
     <enforcer.version>3.0.0-M3</enforcer.version>
 
-
     <!-- parameters to pass to C client build -->
     <c-client-openssl>yes</c-client-openssl>
     <c-client-sasl>yes</c-client-sasl>
 
-    <aggregate.report.dir>zookeeper-isw2-aggregate/target/site/jacoco-aggregate/jacoco.xml</aggregate.report.dir>
+
     <sonar.projectKey>michelablack_zookeeper-isw2</sonar.projectKey>
     <sonar.moduleKey>${artifactId}</sonar.moduleKey>
 

@@ -13,7 +13,6 @@
         <module name="zookeeper-recipes-election" />
         <module name="zookeeper-jute" />
         <module name="zookeeper-compatibility-tests-curator" />
-        <module name="zookeeper-isw2-aggregate" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
