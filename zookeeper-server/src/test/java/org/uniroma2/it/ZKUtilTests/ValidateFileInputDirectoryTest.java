@@ -40,7 +40,7 @@ public class ValidateFileInputDirectoryTest {
             if (!expected) {
                 Files.createDirectories(this.filePath);
                 this.expectedResult = "'" + this.filePath.toAbsolutePath()
-                        + "' is a directory. it must be a file.";
+                        + "' is a direcory. it must be a file.";
             }
             else {
                 Files.createFile(this.filePath);

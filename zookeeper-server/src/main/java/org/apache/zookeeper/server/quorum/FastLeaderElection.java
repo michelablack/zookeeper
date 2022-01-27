@@ -976,7 +976,8 @@ public class FastLeaderElection implements Election {
                     /*
                      * Exponential backoff
                      */
-                    notTimeout = Math.min(notTimeout << 1, maxNotificationInterval);
+                    int tmpTimeOut = notTimeout * 2;
+                    notTimeout = Math.min(tmpTimeOut, maxNotificationInterval);
 
                     /*
                      * When a leader failure happens on a master, the backup will be supposed to receive the honour from
@@ -985,8 +986,8 @@ public class FastLeaderElection implements Election {
                      * The leader election algorithm does not provide the ability of electing a leader from a single instance
                      * which is in a configuration of 2 instances.
                      * */
-                    if (self.getQuorumVerifier() instanceof QuorumOracleMaj
-                            && self.getQuorumVerifier().revalidateVoteset(voteSet, notTimeout != minNotificationInterval)) {
+                    self.getQuorumVerifier().revalidateVoteset(voteSet, notTimeout != minNotificationInterval);
+                    if (self.getQuorumVerifier() instanceof QuorumOracleMaj && voteSet != null && voteSet.hasAllQuorums() && notTimeout != minNotificationInterval) {
                         setPeerState(proposedLeader, voteSet);
                         Vote endVote = new Vote(proposedLeader, proposedZxid, logicalclock.get(), proposedEpoch);
                         leaveInstance(endVote);

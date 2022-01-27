@@ -31,7 +31,10 @@ import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Queue;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.Adler32;
 import java.util.zip.Checksum;
@@ -40,7 +43,6 @@ import org.apache.jute.BinaryOutputArchive;
 import org.apache.jute.InputArchive;
 import org.apache.jute.OutputArchive;
 import org.apache.jute.Record;
-import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.ServerMetrics;
 import org.apache.zookeeper.server.ServerStats;
 import org.apache.zookeeper.server.TxnLogEntry;
@@ -274,7 +276,7 @@ public class FileTxnLog implements TxnLog, Closeable {
                 "Current zxid {} is <= {} for {}",
                 hdr.getZxid(),
                 lastZxidSeen,
-                Request.op2String(hdr.getType()));
+                hdr.getType());
         } else {
             lastZxidSeen = hdr.getZxid();
         }
@@ -810,7 +812,6 @@ public class FileTxnLog implements TxnLog, Closeable {
             if (inputStream != null) {
                 inputStream.close();
             }
-
         }
 
     }

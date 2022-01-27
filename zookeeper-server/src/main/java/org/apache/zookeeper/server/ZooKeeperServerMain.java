@@ -178,8 +178,6 @@ public class ZooKeeperServerMain {
             containerManager.start();
             ZKAuditProvider.addZKStartStopAuditLog();
 
-            serverStarted();
-
             // Watch status of ZooKeeper server. It will do a graceful shutdown
             // if the server is not running or hits an internal error.
             shutdownLatch.await();
@@ -249,35 +247,21 @@ public class ZooKeeperServerMain {
      */
     public void close() {
         ServerCnxnFactory primaryCnxnFactory = this.cnxnFactory;
-        ServerCnxnFactory secondaryCnxnFactory = this.secureCnxnFactory;
+        if (primaryCnxnFactory == null) {
+            // in case of pure TLS we can hook into secureCnxnFactory
+            primaryCnxnFactory = secureCnxnFactory;
+        }
+        if (primaryCnxnFactory == null || primaryCnxnFactory.getZooKeeperServer() == null) {
+            return;
+        }
+        ZooKeeperServerShutdownHandler zkShutdownHandler = primaryCnxnFactory.getZooKeeperServer().getZkShutdownHandler();
+        zkShutdownHandler.handle(ZooKeeperServer.State.SHUTDOWN);
         try {
-            if (primaryCnxnFactory == null) {
-                // in case of pure TLS we can hook into secureCnxnFactory
-                primaryCnxnFactory = secondaryCnxnFactory;
-            }
-            if (primaryCnxnFactory == null || primaryCnxnFactory.getZooKeeperServer() == null) {
-                LOG.info("Connection factory did not start");
-                return;
-            }
-            ZooKeeperServerShutdownHandler zkShutdownHandler = primaryCnxnFactory.getZooKeeperServer().getZkShutdownHandler();
-            zkShutdownHandler.handle(ZooKeeperServer.State.SHUTDOWN);
-            try {
-                // ServerCnxnFactory will call the shutdown
-                primaryCnxnFactory.join();
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
-        } finally {
-            // ensure that we are closing the sockets
-            if (primaryCnxnFactory != null) {
-                primaryCnxnFactory.shutdown();
-            }
-            if (secondaryCnxnFactory != null) {
-                secondaryCnxnFactory.shutdown();
-            }
+            // ServerCnxnFactory will call the shutdown
+            primaryCnxnFactory.join();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
         }
     }
 
-    protected void serverStarted() {
-    }
 }

@@ -28,7 +28,7 @@ public class ListSubTreeBFSTest {
     public static Collection getParams(){
         return Arrays.asList(new Object[][] {
                 {newNode("root1"), false},
-                {newNode(""), false},
+                //{newNode(""), false},
                 {newNode("\u0001"), true}
         });
     }

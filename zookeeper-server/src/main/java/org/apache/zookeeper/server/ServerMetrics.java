@@ -19,7 +19,6 @@
 package org.apache.zookeeper.server;
 
 import org.apache.zookeeper.metrics.Counter;
-import org.apache.zookeeper.metrics.CounterSet;
 import org.apache.zookeeper.metrics.MetricsContext;
 import org.apache.zookeeper.metrics.MetricsContext.DetailLevel;
 import org.apache.zookeeper.metrics.MetricsProvider;
@@ -27,7 +26,6 @@ import org.apache.zookeeper.metrics.Summary;
 import org.apache.zookeeper.metrics.SummarySet;
 import org.apache.zookeeper.metrics.impl.DefaultMetricsProvider;
 import org.apache.zookeeper.metrics.impl.NullMetricsProvider;
-import org.apache.zookeeper.server.util.QuotaMetricsUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,7 +75,6 @@ public final class ServerMetrics {
         UPDATE_LATENCY = metricsContext.getSummary("updatelatency", DetailLevel.ADVANCED);
         PROPAGATION_LATENCY = metricsContext.getSummary("propagation_latency", DetailLevel.ADVANCED);
         FOLLOWER_SYNC_TIME = metricsContext.getSummary("follower_sync_time", DetailLevel.BASIC);
-        OBSERVER_SYNC_TIME = metricsContext.getSummary("observer_sync_time", DetailLevel.BASIC);
         ELECTION_TIME = metricsContext.getSummary("election_time", DetailLevel.BASIC);
         LOOKING_COUNT = metricsContext.getCounter("looking_count");
         DIFF_COUNT = metricsContext.getCounter("diff_count");
@@ -262,8 +259,6 @@ public final class ServerMetrics {
         WATCH_BYTES = metricsContext.getCounter("watch_bytes");
 
         JVM_PAUSE_TIME = metricsContext.getSummary("jvm_pause_time_ms", DetailLevel.ADVANCED);
-
-        QUOTA_EXCEEDED_ERROR_PER_NAMESPACE = metricsContext.getCounterSet(QuotaMetricsUtils.QUOTA_EXCEEDED_ERROR_PER_NAMESPACE);
     }
 
     /**
@@ -301,7 +296,6 @@ public final class ServerMetrics {
     public final Summary PROPAGATION_LATENCY;
 
     public final Summary FOLLOWER_SYNC_TIME;
-    public final Summary OBSERVER_SYNC_TIME;
 
     public final Summary ELECTION_TIME;
 
@@ -514,8 +508,6 @@ public final class ServerMetrics {
     public final Counter WATCH_BYTES;
 
     public final Summary JVM_PAUSE_TIME;
-
-    public final CounterSet QUOTA_EXCEEDED_ERROR_PER_NAMESPACE;
 
     private final MetricsProvider metricsProvider;
 

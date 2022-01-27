@@ -1135,6 +1135,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             adminServer.start();
         } catch (AdminServerException e) {
             LOG.warn("Problem starting AdminServer", e);
+            System.out.println(e);
         }
         startLeaderElection();
         startJvmPauseMonitor();

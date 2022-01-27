@@ -52,7 +52,6 @@ import org.apache.zookeeper.Version;
 import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.ZookeeperBanner;
-import org.apache.zookeeper.common.PathUtils;
 import org.apache.zookeeper.common.StringUtils;
 import org.apache.zookeeper.common.Time;
 import org.apache.zookeeper.data.ACL;
@@ -83,7 +82,6 @@ import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
 import org.apache.zookeeper.server.quorum.ReadOnlyZooKeeperServer;
 import org.apache.zookeeper.server.util.JvmPauseMonitor;
 import org.apache.zookeeper.server.util.OSMXBean;
-import org.apache.zookeeper.server.util.QuotaMetricsUtils;
 import org.apache.zookeeper.server.util.RequestPathMetricsCollector;
 import org.apache.zookeeper.txn.CreateSessionTxn;
 import org.apache.zookeeper.txn.TxnDigest;
@@ -196,8 +194,6 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     protected String initialConfig;
     protected boolean reconfigEnabled;
     private final RequestPathMetricsCollector requestPathMetricsCollector;
-    private static final int DEFAULT_SNAP_COUNT = 100000;
-    private static final int DEFAULT_GLOBAL_OUTSTANDING_LIMIT = 1000;
 
     private boolean localSessionEnabled = false;
     protected enum State {
@@ -255,7 +251,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         intBufferStartingSizeBytes = Integer.getInteger(INT_BUFFER_STARTING_SIZE_BYTES, DEFAULT_STARTING_BUFFER_SIZE);
 
         if (intBufferStartingSizeBytes < 32) {
-            String msg = "Buffer starting size (" + intBufferStartingSizeBytes + ") must be greater than or equal to 32. "
+            String msg = "Buffer starting size must be greater than or equal to 32."
                          + "Configure with \"-Dzookeeper.intBufferStartingSizeBytes=<size>\" ";
             LOG.error(msg);
             throw new IllegalArgumentException(msg);
@@ -633,12 +629,6 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             "Expiring session 0x{}, timeout of {}ms exceeded",
             Long.toHexString(sessionId),
             session.getTimeout());
-        close(sessionId);
-    }
-
-    public void expire(long sessionId) {
-        LOG.info("forcibly expiring session 0x{}", Long.toHexString(sessionId));
-
         close(sessionId);
     }
 
@@ -1187,17 +1177,30 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     }
 
     public static int getSnapCount() {
-        int snapCount = Integer.getInteger(SNAP_COUNT, DEFAULT_SNAP_COUNT);
-        // snapCount must be 2 or more. See org.apache.zookeeper.server.SyncRequestProcessor
-        if (snapCount < 2) {
-            LOG.warn("SnapCount should be 2 or more. Now, snapCount is reset to 2");
-            snapCount = 2;
+        String sc = System.getProperty(SNAP_COUNT);
+        try {
+            int snapCount = Integer.parseInt(sc);
+
+            // snapCount must be 2 or more. See org.apache.zookeeper.server.SyncRequestProcessor
+            if (snapCount < 2) {
+                LOG.warn("SnapCount should be 2 or more. Now, snapCount is reset to 2");
+                snapCount = 2;
+            }
+            return snapCount;
+        } catch (Exception e) {
+            return 100000;
         }
-        return snapCount;
     }
 
     public int getGlobalOutstandingLimit() {
-        return Integer.getInteger(GLOBAL_OUTSTANDING_LIMIT, DEFAULT_GLOBAL_OUTSTANDING_LIMIT);
+        String sc = System.getProperty(GLOBAL_OUTSTANDING_LIMIT);
+        int limit;
+        try {
+            limit = Integer.parseInt(sc);
+        } catch (Exception e) {
+            limit = 1000;
+        }
+        return limit;
     }
 
     public static long getSnapSizeInBytes() {
@@ -1915,15 +1918,6 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         rootContext.registerGauge("auth_failed_count", stats::getAuthFailedCount);
         rootContext.registerGauge("non_mtls_remote_conn_count", stats::getNonMTLSRemoteConnCount);
         rootContext.registerGauge("non_mtls_local_conn_count", stats::getNonMTLSLocalConnCount);
-
-        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_LIMIT_PER_NAMESPACE,
-                () -> QuotaMetricsUtils.getQuotaCountLimit(zkDb.getDataTree()));
-        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_LIMIT_PER_NAMESPACE,
-                () -> QuotaMetricsUtils.getQuotaBytesLimit(zkDb.getDataTree()));
-        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_USAGE_PER_NAMESPACE,
-                () -> QuotaMetricsUtils.getQuotaCountUsage(zkDb.getDataTree()));
-        rootContext.registerGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_USAGE_PER_NAMESPACE,
-                () -> QuotaMetricsUtils.getQuotaBytesUsage(zkDb.getDataTree()));
     }
 
     protected void unregisterMetrics() {
@@ -1963,10 +1957,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         rootContext.unregisterGauge("non_mtls_remote_conn_count");
         rootContext.unregisterGauge("non_mtls_local_conn_count");
 
-        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_LIMIT_PER_NAMESPACE);
-        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_LIMIT_PER_NAMESPACE);
-        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_COUNT_USAGE_PER_NAMESPACE);
-        rootContext.unregisterGaugeSet(QuotaMetricsUtils.QUOTA_BYTES_USAGE_PER_NAMESPACE);
+
     }
 
     /**
@@ -2052,13 +2043,12 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             return;
         }
 
-        final String namespace = PathUtils.getTopNamespace(path);
         switch (type) {
             case OpCode.create:
-                checkQuota(lastPrefix, dataBytes, 1, namespace);
+                checkQuota(lastPrefix, dataBytes, 1);
                 break;
             case OpCode.setData:
-                checkQuota(lastPrefix, dataBytes - (lastData == null ? 0 : lastData.length), 0, namespace);
+                checkQuota(lastPrefix, dataBytes - (lastData == null ? 0 : lastData.length), 0);
                 break;
              default:
                  throw new IllegalArgumentException("Unsupported OpCode for checkQuota: " + type);
@@ -2074,10 +2064,8 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
      *            the diff to be added to number of bytes
      * @param countDiff
      *            the diff to be added to the count
-     * @param namespace
-      *           the namespace for collecting quota exceeded errors
      */
-    private void checkQuota(String lastPrefix, long bytesDiff, long countDiff, String namespace)
+    private void checkQuota(String lastPrefix, long bytesDiff, long countDiff)
             throws KeeperException.QuotaExceededException {
         LOG.debug("checkQuota: lastPrefix={}, bytesDiff={}, countDiff={}", lastPrefix, bytesDiff, countDiff);
 
@@ -2118,14 +2106,13 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         //check the Count Quota
         if (checkCountQuota) {
             long newCount = currentStats.getCount() + countDiff;
-            boolean isCountHardLimit = limitStats.getCountHardLimit() > -1;
+            boolean isCountHardLimit = limitStats.getCountHardLimit() > -1 ? true : false;
             long countLimit = isCountHardLimit ? limitStats.getCountHardLimit() : limitStats.getCount();
 
             if (newCount > countLimit) {
                 String msg = "Quota exceeded: " + lastPrefix + " [current count=" + newCount + ", " + (isCountHardLimit ? "hard" : "soft") + "CountLimit=" + countLimit + "]";
                 RATE_LOGGER.rateLimitLog(msg);
                 if (isCountHardLimit) {
-                    updateQuotaExceededMetrics(namespace);
                     throw new KeeperException.QuotaExceededException(lastPrefix);
                 }
             }
@@ -2134,13 +2121,12 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         //check the Byte Quota
         if (checkByteQuota) {
             long newBytes = currentStats.getBytes() + bytesDiff;
-            boolean isByteHardLimit = limitStats.getByteHardLimit() > -1;
+            boolean isByteHardLimit = limitStats.getByteHardLimit() > -1 ? true : false;
             long byteLimit = isByteHardLimit ? limitStats.getByteHardLimit() : limitStats.getBytes();
             if (newBytes > byteLimit) {
                 String msg = "Quota exceeded: " + lastPrefix + " [current bytes=" + newBytes + ", " + (isByteHardLimit ? "hard" : "soft") + "ByteLimit=" + byteLimit + "]";
                 RATE_LOGGER.rateLimitLog(msg);
                 if (isByteHardLimit) {
-                    updateQuotaExceededMetrics(namespace);
                     throw new KeeperException.QuotaExceededException(lastPrefix);
                 }
             }
@@ -2325,11 +2311,4 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         return zkShutdownHandler;
     }
 
-    static void updateQuotaExceededMetrics(final String namespace) {
-        if (namespace == null) {
-            return;
-        }
-        ServerMetrics.getMetrics().QUOTA_EXCEEDED_ERROR_PER_NAMESPACE.add(namespace, 1);
-    }
 }
-

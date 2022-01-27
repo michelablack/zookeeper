@@ -957,13 +957,8 @@ public class QuorumCnxManager {
                                 new ListenerHandler(address, self.shouldUsePortUnification(), self.isSslQuorum(), latch))
                         .collect(Collectors.toList());
 
-                final ExecutorService executor = Executors.newFixedThreadPool(addresses.size());
-                try {
-                    listenerHandlers.forEach(executor::submit);
-                } finally {
-                    // prevent executor's threads to leak after ListenerHandler tasks complete
-                    executor.shutdown();
-                }
+                ExecutorService executor = Executors.newFixedThreadPool(addresses.size());
+                listenerHandlers.forEach(executor::submit);
 
                 try {
                     latch.await();
