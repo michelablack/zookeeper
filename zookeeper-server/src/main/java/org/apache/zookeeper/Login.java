@@ -91,7 +91,7 @@ public class Login {
      *            javax.security.auth.login.LoginContext().
      * @param zkConfig
      *            client or server configurations
-     * @throws javax.security.auth.login.LoginException
+     * @throws LoginException
      *             Thrown if authentication fails.
      */
     public Login(final String loginContextName, CallbackHandler callbackHandler, final ZKConfig zkConfig) throws LoginException {
@@ -409,7 +409,7 @@ public class Login {
 
     /**
      * Re-login a principal. This method assumes that {@link #login(String)} has happened already.
-     * @throws javax.security.auth.login.LoginException on a failure
+     * @throws LoginException on a failure
      */
     // c.f. HADOOP-6559
     private synchronized void reLogin() throws LoginException {

@@ -248,7 +248,7 @@ public abstract class X509Util implements Closeable, AutoCloseable {
         return sslHandshakeDetectionTimeoutMillisProperty;
     }
 
-    public SSLContext getDefaultSSLContext() throws X509Exception.SSLContextException {
+    public SSLContext getDefaultSSLContext() throws SSLContextException {
         return getDefaultSSLContextAndOptions().getSSLContext();
     }
 
@@ -256,7 +256,7 @@ public abstract class X509Util implements Closeable, AutoCloseable {
         return createSSLContextAndOptions(config).getSSLContext();
     }
 
-    public SSLContextAndOptions getDefaultSSLContextAndOptions() throws X509Exception.SSLContextException {
+    public SSLContextAndOptions getDefaultSSLContextAndOptions() throws SSLContextException {
         SSLContextAndOptions result = defaultSSLContextAndOptions.get();
         if (result == null) {
             result = createSSLContextAndOptions();
@@ -268,7 +268,7 @@ public abstract class X509Util implements Closeable, AutoCloseable {
         return result;
     }
 
-    private void resetDefaultSSLContextAndOptions() throws X509Exception.SSLContextException {
+    private void resetDefaultSSLContextAndOptions() throws SSLContextException {
         SSLContextAndOptions newContext = createSSLContextAndOptions();
         defaultSSLContextAndOptions.set(newContext);
     }

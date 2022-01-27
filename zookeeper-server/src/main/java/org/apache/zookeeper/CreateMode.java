@@ -52,7 +52,7 @@ public enum CreateMode {
      * etc. When the last child of a container is deleted, the container becomes
      * a candidate to be deleted by the server at some point in the future.
      * Given this property, you should be prepared to get
-     * {@link org.apache.zookeeper.KeeperException.NoNodeException}
+     * {@link KeeperException.NoNodeException}
      * when creating children inside of this container node.
      */
     CONTAINER(4, false, false, true, false),

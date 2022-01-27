@@ -305,7 +305,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         return sessionsById.containsKey(sessionId);
     }
 
-    public synchronized void checkSession(long sessionId, Object owner) throws KeeperException.SessionExpiredException, KeeperException.SessionMovedException, KeeperException.UnknownSessionException {
+    public synchronized void checkSession(long sessionId, Object owner) throws SessionExpiredException, KeeperException.SessionMovedException, KeeperException.UnknownSessionException {
         LOG.debug("Checking session 0x{}", Long.toHexString(sessionId));
         SessionImpl session = sessionsById.get(sessionId);
 
@@ -314,7 +314,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         }
 
         if (session.isClosing()) {
-            throw new KeeperException.SessionExpiredException();
+            throw new SessionExpiredException();
         }
 
         if (session.owner == null) {
@@ -327,16 +327,16 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
     public synchronized void setOwner(long id, Object owner) throws SessionExpiredException {
         SessionImpl session = sessionsById.get(id);
         if (session == null || session.isClosing()) {
-            throw new KeeperException.SessionExpiredException();
+            throw new SessionExpiredException();
         }
         session.owner = owner;
     }
 
-    public void checkGlobalSession(long sessionId, Object owner) throws KeeperException.SessionExpiredException, KeeperException.SessionMovedException {
+    public void checkGlobalSession(long sessionId, Object owner) throws SessionExpiredException, KeeperException.SessionMovedException {
         try {
             checkSession(sessionId, owner);
         } catch (KeeperException.UnknownSessionException e) {
-            throw new KeeperException.SessionExpiredException();
+            throw new SessionExpiredException();
         }
     }
 

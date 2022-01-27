@@ -49,7 +49,7 @@ public class LearnerSyncThrottler {
      * <code>maxConcurrentSyncs</code>.
      * @param maxConcurrentSyncs maximum concurrent number of syncs
      * @param syncType either a snapshot sync or a txn-based diff sync
-     * @throws java.lang.IllegalArgumentException when <code>maxConcurrentSyncs</code>
+     * @throws IllegalArgumentException when <code>maxConcurrentSyncs</code>
      *                                            is less than 1
      */
     public LearnerSyncThrottler(int maxConcurrentSyncs, SyncType syncType) throws IllegalArgumentException {

@@ -596,12 +596,12 @@ public class ClientCnxn {
                         ((Children2Callback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx, null, null);
                     } else if (lcb.cb instanceof StringCallback) {
                         ((StringCallback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx, null);
-                    } else if (lcb.cb instanceof AsyncCallback.EphemeralsCallback) {
-                        ((AsyncCallback.EphemeralsCallback) lcb.cb).processResult(lcb.rc, lcb.ctx, null);
-                    } else if (lcb.cb instanceof AsyncCallback.AllChildrenNumberCallback) {
-                        ((AsyncCallback.AllChildrenNumberCallback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx, -1);
-                    } else if (lcb.cb instanceof AsyncCallback.MultiCallback) {
-                        ((AsyncCallback.MultiCallback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx, Collections.emptyList());
+                    } else if (lcb.cb instanceof EphemeralsCallback) {
+                        ((EphemeralsCallback) lcb.cb).processResult(lcb.rc, lcb.ctx, null);
+                    } else if (lcb.cb instanceof AllChildrenNumberCallback) {
+                        ((AllChildrenNumberCallback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx, -1);
+                    } else if (lcb.cb instanceof MultiCallback) {
+                        ((MultiCallback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx, Collections.emptyList());
                     } else {
                         ((VoidCallback) lcb.cb).processResult(lcb.rc, lcb.path, lcb.ctx);
                     }
@@ -706,7 +706,7 @@ public class ClientCnxn {
                             int newRc = rc;
                             for (OpResult result : results) {
                                 if (result instanceof ErrorResult
-                                    && KeeperException.Code.OK.intValue()
+                                    && Code.OK.intValue()
                                        != (newRc = ((ErrorResult) result).getErr())) {
                                     break;
                                 }
@@ -776,9 +776,9 @@ public class ClientCnxn {
 
     void queueEvent(String clientPath, int err, Set<Watcher> materializedWatchers, EventType eventType) {
         KeeperState sessionState = KeeperState.SyncConnected;
-        if (KeeperException.Code.SESSIONEXPIRED.intValue() == err
-            || KeeperException.Code.CONNECTIONLOSS.intValue() == err) {
-            sessionState = Event.KeeperState.Disconnected;
+        if (Code.SESSIONEXPIRED.intValue() == err
+            || Code.CONNECTIONLOSS.intValue() == err) {
+            sessionState = KeeperState.Disconnected;
         }
         WatchedEvent event = new WatchedEvent(eventType, sessionState, clientPath);
         eventThread.queueEvent(event, materializedWatchers);
@@ -799,13 +799,13 @@ public class ClientCnxn {
         }
         switch (state) {
         case AUTH_FAILED:
-            p.replyHeader.setErr(KeeperException.Code.AUTHFAILED.intValue());
+            p.replyHeader.setErr(Code.AUTHFAILED.intValue());
             break;
         case CLOSED:
-            p.replyHeader.setErr(KeeperException.Code.SESSIONEXPIRED.intValue());
+            p.replyHeader.setErr(Code.SESSIONEXPIRED.intValue());
             break;
         default:
-            p.replyHeader.setErr(KeeperException.Code.CONNECTIONLOSS.intValue());
+            p.replyHeader.setErr(Code.CONNECTIONLOSS.intValue());
         }
         finishPacket(p);
     }
@@ -885,10 +885,10 @@ public class ClientCnxn {
                 return;
               case AUTHPACKET_XID:
                 LOG.debug("Got auth session id: 0x{}", Long.toHexString(sessionId));
-                if (replyHdr.getErr() == KeeperException.Code.AUTHFAILED.intValue()) {
+                if (replyHdr.getErr() == Code.AUTHFAILED.intValue()) {
                     changeZkState(States.AUTH_FAILED);
-                    eventThread.queueEvent(new WatchedEvent(Watcher.Event.EventType.None,
-                        Watcher.Event.KeeperState.AuthFailed, null));
+                    eventThread.queueEvent(new WatchedEvent(EventType.None,
+                        KeeperState.AuthFailed, null));
                     eventThread.queueEventOfDeath();
                 }
               return;
@@ -942,7 +942,7 @@ public class ClientCnxn {
              */
             try {
                 if (packet.requestHeader.getXid() != replyHdr.getXid()) {
-                    packet.replyHeader.setErr(KeeperException.Code.CONNECTIONLOSS.intValue());
+                    packet.replyHeader.setErr(Code.CONNECTIONLOSS.intValue());
                     throw new IOException("Xid out of order. Got Xid " + replyHdr.getXid()
                                           + " with err " + replyHdr.getErr()
                                           + " expected Xid " + packet.requestHeader.getXid()
@@ -981,11 +981,11 @@ public class ClientCnxn {
          *
          * @return
          */
-        synchronized ZooKeeper.States getZkState() {
+        synchronized States getZkState() {
             return state;
         }
 
-        synchronized void changeZkState(ZooKeeper.States newState) throws IOException {
+        synchronized void changeZkState(States newState) throws IOException {
             if (!state.isAlive() && newState == States.CONNECTING) {
                 throw new IOException(
                         "Connection has already been closed and reconnection is not allowed");
@@ -1158,7 +1158,7 @@ public class ClientCnxn {
                         "SASL configuration failed. "
                             + "Will continue connection to Zookeeper server without "
                             + "SASL authentication, if Zookeeper server allows it.", e);
-                    eventThread.queueEvent(new WatchedEvent(Watcher.Event.EventType.None, Watcher.Event.KeeperState.AuthFailed, null));
+                    eventThread.queueEvent(new WatchedEvent(EventType.None, KeeperState.AuthFailed, null));
                     saslLoginFailed = true;
                 }
             }
@@ -1230,7 +1230,7 @@ public class ClientCnxn {
                             }
 
                             if (sendAuthEvent) {
-                                eventThread.queueEvent(new WatchedEvent(Watcher.Event.EventType.None, authState, null));
+                                eventThread.queueEvent(new WatchedEvent(EventType.None, authState, null));
                                 if (state == States.AUTH_FAILED) {
                                     eventThread.queueEventOfDeath();
                                 }
@@ -1310,9 +1310,9 @@ public class ClientCnxn {
             }
             clientCnxnSocket.close();
             if (state.isAlive()) {
-                eventThread.queueEvent(new WatchedEvent(Event.EventType.None, Event.KeeperState.Disconnected, null));
+                eventThread.queueEvent(new WatchedEvent(EventType.None, KeeperState.Disconnected, null));
             }
-            eventThread.queueEvent(new WatchedEvent(Event.EventType.None, Event.KeeperState.Closed, null));
+            eventThread.queueEvent(new WatchedEvent(EventType.None, KeeperState.Closed, null));
             ZooTrace.logTraceMessage(
                 LOG,
                 ZooTrace.getTextTraceLevel(),
@@ -1322,7 +1322,7 @@ public class ClientCnxn {
         private void cleanAndNotifyState() {
             cleanup();
             if (state.isAlive()) {
-                eventThread.queueEvent(new WatchedEvent(Event.EventType.None, Event.KeeperState.Disconnected, null));
+                eventThread.queueEvent(new WatchedEvent(EventType.None, KeeperState.Disconnected, null));
             }
             clientCnxnSocket.updateNow();
             clientCnxnSocket.updateLastSendAndHeard();
@@ -1416,7 +1416,7 @@ public class ClientCnxn {
             if (negotiatedSessionTimeout <= 0) {
                 changeZkState(States.CLOSED);
 
-                eventThread.queueEvent(new WatchedEvent(Watcher.Event.EventType.None, Watcher.Event.KeeperState.Expired, null));
+                eventThread.queueEvent(new WatchedEvent(EventType.None, KeeperState.Expired, null));
                 eventThread.queueEventOfDeath();
 
                 String warnInfo = String.format(
@@ -1444,7 +1444,7 @@ public class ClientCnxn {
                 negotiatedSessionTimeout,
                 (isRO ? " (READ-ONLY mode)" : ""));
             KeeperState eventState = (isRO) ? KeeperState.ConnectedReadOnly : KeeperState.SyncConnected;
-            eventThread.queueEvent(new WatchedEvent(Watcher.Event.EventType.None, eventState, null));
+            eventThread.queueEvent(new WatchedEvent(EventType.None, eventState, null));
         }
 
         void close() {
@@ -1520,7 +1520,7 @@ public class ClientCnxn {
 
         try {
             RequestHeader h = new RequestHeader();
-            h.setType(ZooDefs.OpCode.closeSession);
+            h.setType(OpCode.closeSession);
 
             submitRequest(h, null, null, null);
         } catch (InterruptedException e) {

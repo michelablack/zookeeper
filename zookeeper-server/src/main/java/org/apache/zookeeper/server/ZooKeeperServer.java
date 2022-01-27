@@ -1622,7 +1622,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             ByteBufferInputStream.byteBuffer2Record(incomingBuffer, authPacket);
             String scheme = authPacket.getScheme();
             ServerAuthenticationProvider ap = ProviderRegistry.getServerProvider(scheme);
-            Code authReturn = KeeperException.Code.AUTHFAILED;
+            Code authReturn = Code.AUTHFAILED;
             if (ap != null) {
                 try {
                     // handleAuthentication may close the connection, to allow the client to choose
@@ -1632,14 +1632,14 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
                         authPacket.getAuth());
                 } catch (RuntimeException e) {
                     LOG.warn("Caught runtime exception from AuthenticationProvider: {}", scheme, e);
-                    authReturn = KeeperException.Code.AUTHFAILED;
+                    authReturn = Code.AUTHFAILED;
                 }
             }
-            if (authReturn == KeeperException.Code.OK) {
+            if (authReturn == Code.OK) {
                 LOG.info("Session 0x{}: auth success for scheme {} and address {}",
                         Long.toHexString(cnxn.getSessionId()), scheme,
                         cnxn.getRemoteSocketAddress());
-                ReplyHeader rh = new ReplyHeader(h.getXid(), 0, KeeperException.Code.OK.intValue());
+                ReplyHeader rh = new ReplyHeader(h.getXid(), 0, Code.OK.intValue());
                 cnxn.sendResponse(rh, null, null);
             } else {
                 if (ap == null) {
@@ -1651,7 +1651,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
                     LOG.warn("Authentication failed for scheme: {}", scheme);
                 }
                 // send a response...
-                ReplyHeader rh = new ReplyHeader(h.getXid(), 0, KeeperException.Code.AUTHFAILED.intValue());
+                ReplyHeader rh = new ReplyHeader(h.getXid(), 0, Code.AUTHFAILED.intValue());
                 cnxn.sendResponse(rh, null, null);
                 // ... and close connection
                 cnxn.sendBuffer(ServerCnxnFactory.closeConn);
@@ -2251,7 +2251,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
      *
      * @param request
      * @return true if request is permitted, false if not.
-     * @throws java.io.IOException
+     * @throws IOException
      */
     public boolean authWriteRequest(Request request) {
         int err;
@@ -2261,7 +2261,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             return true;
         }
 
-        err = KeeperException.Code.OK.intValue();
+        err = Code.OK.intValue();
 
         try {
             pathToCheck = effectiveACLPath(request);
@@ -2282,7 +2282,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             LOG.error("Uncaught exception in authWriteRequest with: ", t);
             throw t;
         } finally {
-            if (err != KeeperException.Code.OK.intValue()) {
+            if (err != Code.OK.intValue()) {
                 /*  This request has a bad ACL, so we are dismissing it early. */
                 decInProcess();
                 ReplyHeader rh = new ReplyHeader(request.cxid, 0, err);
@@ -2294,7 +2294,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             }
         }
 
-        return err == KeeperException.Code.OK.intValue();
+        return err == Code.OK.intValue();
     }
 
     private boolean buffer2Record(ByteBuffer request, Record record) {

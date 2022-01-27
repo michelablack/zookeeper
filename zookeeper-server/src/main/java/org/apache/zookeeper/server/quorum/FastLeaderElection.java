@@ -131,7 +131,7 @@ public class FastLeaderElection implements Election {
 
         /*
          * current state of sender
-         */ QuorumPeer.ServerState state;
+         */ ServerState state;
 
         /*
          * Address of sender
@@ -185,7 +185,7 @@ public class FastLeaderElection implements Election {
 
         /*
          * Current state;
-         */ QuorumPeer.ServerState state;
+         */ ServerState state;
 
         /*
          * Address of recipient
@@ -359,19 +359,19 @@ public class FastLeaderElection implements Election {
                             LOG.debug("Receive new notification message. My id = {}", self.getId());
 
                             // State of peer that sent this message
-                            QuorumPeer.ServerState ackstate = QuorumPeer.ServerState.LOOKING;
+                            ServerState ackstate = ServerState.LOOKING;
                             switch (rstate) {
                             case 0:
-                                ackstate = QuorumPeer.ServerState.LOOKING;
+                                ackstate = ServerState.LOOKING;
                                 break;
                             case 1:
-                                ackstate = QuorumPeer.ServerState.FOLLOWING;
+                                ackstate = ServerState.FOLLOWING;
                                 break;
                             case 2:
-                                ackstate = QuorumPeer.ServerState.LEADING;
+                                ackstate = ServerState.LEADING;
                                 break;
                             case 3:
-                                ackstate = QuorumPeer.ServerState.OBSERVING;
+                                ackstate = ServerState.OBSERVING;
                                 break;
                             default:
                                 continue;
@@ -405,7 +405,7 @@ public class FastLeaderElection implements Election {
                              * If this server is looking, then send proposed leader
                              */
 
-                            if (self.getPeerState() == QuorumPeer.ServerState.LOOKING) {
+                            if (self.getPeerState() == ServerState.LOOKING) {
                                 recvqueue.offer(n);
 
                                 /*
@@ -413,7 +413,7 @@ public class FastLeaderElection implements Election {
                                  * message is also looking and its logical clock is
                                  * lagging behind.
                                  */
-                                if ((ackstate == QuorumPeer.ServerState.LOOKING)
+                                if ((ackstate == ServerState.LOOKING)
                                     && (n.electionEpoch < logicalclock.get())) {
                                     Vote v = getVote();
                                     QuorumVerifier qv = self.getQuorumVerifier();
@@ -434,7 +434,7 @@ public class FastLeaderElection implements Election {
                                  * is looking, then send back what it believes to be the leader.
                                  */
                                 Vote current = self.getCurrentVote();
-                                if (ackstate == QuorumPeer.ServerState.LOOKING) {
+                                if (ackstate == ServerState.LOOKING) {
                                     if (self.leader != null) {
                                         if (leadingVoteSet != null) {
                                             self.leader.setLeadingVoteSet(leadingVoteSet);
@@ -696,7 +696,7 @@ public class FastLeaderElection implements Election {
                 proposedLeader,
                 proposedZxid,
                 logicalclock.get(),
-                QuorumPeer.ServerState.LOOKING,
+                ServerState.LOOKING,
                 sid,
                 proposedEpoch,
                 qv.toString().getBytes(UTF_8));

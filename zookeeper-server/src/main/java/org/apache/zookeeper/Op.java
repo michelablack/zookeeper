@@ -40,8 +40,8 @@ import org.apache.zookeeper.server.EphemeralType;
  * Sub-classes of Op each represent each detailed type but should not normally be referenced except via
  * the provided factory methods.
  *
- * @see ZooKeeper#create(String, byte[], java.util.List, CreateMode)
- * @see ZooKeeper#create(String, byte[], java.util.List, CreateMode, org.apache.zookeeper.AsyncCallback.StringCallback, Object)
+ * @see ZooKeeper#create(String, byte[], List, CreateMode)
+ * @see ZooKeeper#create(String, byte[], List, CreateMode, AsyncCallback.StringCallback, Object)
  * @see ZooKeeper#delete(String, int)
  * @see ZooKeeper#setData(String, byte[], int)
  * @see ZooKeeper#getData(String, boolean, Stat)
@@ -67,7 +67,7 @@ public abstract class Op {
 
     /**
      * Constructs a create operation.  Arguments are as for the ZooKeeper method of the same name.
-     * @see ZooKeeper#create(String, byte[], java.util.List, CreateMode)
+     * @see ZooKeeper#create(String, byte[], List, CreateMode)
      * @see CreateMode#fromFlag(int)
      *
      * @param path
@@ -87,7 +87,7 @@ public abstract class Op {
     /**
      * Constructs a create operation.  Arguments are as for the ZooKeeper method of the same name
      * but adding an optional ttl
-     * @see ZooKeeper#create(String, byte[], java.util.List, CreateMode)
+     * @see ZooKeeper#create(String, byte[], List, CreateMode)
      * @see CreateMode#fromFlag(int)
      *
      * @param path
@@ -112,7 +112,7 @@ public abstract class Op {
 
     /**
      * Constructs a create operation.  Arguments are as for the ZooKeeper method of the same name.
-     * @see ZooKeeper#create(String, byte[], java.util.List, CreateMode)
+     * @see ZooKeeper#create(String, byte[], List, CreateMode)
      *
      * @param path
      *                the path for the node
@@ -131,7 +131,7 @@ public abstract class Op {
     /**
      * Constructs a create operation.  Arguments are as for the ZooKeeper method of the same name
      * but adding an optional ttl
-     * @see ZooKeeper#create(String, byte[], java.util.List, CreateMode)
+     * @see ZooKeeper#create(String, byte[], List, CreateMode)
      *
      * @param path
      *                the path for the node

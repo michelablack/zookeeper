@@ -101,7 +101,7 @@
       */
      public static String normalizeFileSystemPath(String path) {
          if (path != null) {
-             String osname = java.lang.System.getProperty("os.name");
+             String osname = System.getProperty("os.name");
              if (osname.toLowerCase().contains("windows")) {
                  return path.replace('\\', '/');
              }

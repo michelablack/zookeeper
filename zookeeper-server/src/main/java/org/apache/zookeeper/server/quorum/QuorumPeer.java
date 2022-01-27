@@ -1640,7 +1640,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
      * A 'view' is a node's current opinion of the membership of the entire
      * ensemble.
      */
-    public Map<Long, QuorumPeer.QuorumServer> getView() {
+    public Map<Long, QuorumServer> getView() {
         return Collections.unmodifiableMap(getQuorumVerifier().getAllMembers());
     }
 
@@ -1648,14 +1648,14 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
      * Observers are not contained in this view, only nodes with
      * PeerType=PARTICIPANT.
      */
-    public Map<Long, QuorumPeer.QuorumServer> getVotingView() {
+    public Map<Long, QuorumServer> getVotingView() {
         return getQuorumVerifier().getVotingMembers();
     }
 
     /**
      * Returns only observers, no followers.
      */
-    public Map<Long, QuorumPeer.QuorumServer> getObservingView() {
+    public Map<Long, QuorumServer> getObservingView() {
         return getQuorumVerifier().getObservingMembers();
     }
 
