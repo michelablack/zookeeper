@@ -9,6 +9,7 @@
       <module fileurl="file://$PROJECT_DIR$/zookeeper-compatibility-tests/zookeeper-compatibility-tests.iml" filepath="$PROJECT_DIR$/zookeeper-compatibility-tests/zookeeper-compatibility-tests.iml" />
       <module fileurl="file://$PROJECT_DIR$/zookeeper-compatibility-tests/zookeeper-compatibility-tests-curator/zookeeper-compatibility-tests-curator.iml" filepath="$PROJECT_DIR$/zookeeper-compatibility-tests/zookeeper-compatibility-tests-curator/zookeeper-compatibility-tests-curator.iml" />
       <module fileurl="file://$PROJECT_DIR$/zookeeper-docs/zookeeper-docs.iml" filepath="$PROJECT_DIR$/zookeeper-docs/zookeeper-docs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/zookeeper-isw2-aggregate/zookeeper-isw2-aggregate.iml" filepath="$PROJECT_DIR$/zookeeper-isw2-aggregate/zookeeper-isw2-aggregate.iml" />
       <module fileurl="file://$PROJECT_DIR$/zookeeper-jute/zookeeper-jute.iml" filepath="$PROJECT_DIR$/zookeeper-jute/zookeeper-jute.iml" />
       <module fileurl="file://$PROJECT_DIR$/zookeeper-metrics-providers/zookeeper-metrics-providers.iml" filepath="$PROJECT_DIR$/zookeeper-metrics-providers/zookeeper-metrics-providers.iml" />
       <module fileurl="file://$PROJECT_DIR$/zookeeper-metrics-providers/zookeeper-prometheus-metrics/zookeeper-prometheus-metrics.iml" filepath="$PROJECT_DIR$/zookeeper-metrics-providers/zookeeper-prometheus-metrics/zookeeper-prometheus-metrics.iml" />
