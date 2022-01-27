@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,9 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.zookeeper.test.system;
+package org.apache.zookeeper.metrics;
 
-public class NoAssignmentException extends Exception {
-    private static final long serialVersionUID = 1L;
+import java.util.Map;
 
+/**
+ * A Gauge is an application provided object which will be called by the metrics framework to sample a numeric value.
+ *
+ * A GaugeSet is a set of {@link Gauge} grouped by keys.
+ */
+public interface GaugeSet {
+    /**
+     * Returns all values and the associated keys of the GaugeSet.
+     * The MetricsProvider will call this callback without taking care of synchronization, it is up to the application
+     * to handle thread safety.
+     *
+     * @return all the values and keys
+     */
+    Map<String, Number> values();
 }

@@ -88,7 +88,6 @@ public class FileSnap implements SnapShot {
                 InputArchive ia = BinaryInputArchive.getArchive(snapIS);
                 deserialize(dt, sessions, ia);
                 SnapStream.checkSealIntegrity(snapIS, ia);
-
                 // Digest feature was added after the CRC to make it backward
                 // compatible, the older code can still read snapshots which
                 // includes digest.
@@ -100,6 +99,7 @@ public class FileSnap implements SnapShot {
                 }
 
                 foundValid = true;
+
                 break;
             } catch (IOException e) {
                 LOG.warn("problem reading snap file {}", snap, e);
@@ -159,7 +159,7 @@ public class FileSnap implements SnapShot {
      * less than n in case enough snapshots are not available).
      * @throws IOException
      */
-    protected List<File> findNValidSnapshots(int n) throws IOException {
+    public List<File> findNValidSnapshots(int n) throws IOException {
         List<File> files = Util.sortDataDir(snapDir.listFiles(), SNAPSHOT_FILE_PREFIX, false);
         int count = 0;
         List<File> list = new ArrayList<File>();

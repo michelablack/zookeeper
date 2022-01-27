@@ -64,7 +64,7 @@ public class FileTxnLogAppendTest {
                 {new TxnHeader(1L, 0, 1L, 1000L, 1), record, txnDigest, false, false},
                 {null, record, txnDigest, false, false},
                 {new TxnHeader(1L, 0, 1L, 1000L, 1), null, txnDigest, true, false},
-                //{new TxnHeader(1L, 0, -1L, 1000L, 1), record, txnDigest, true, true}
+                {new TxnHeader(1L, 0, -1L, 1000L, 1), record, txnDigest, true, true}
         });
     }
 
