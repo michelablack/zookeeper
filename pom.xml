@@ -750,6 +750,7 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.8.1</version>
           <configuration>
             <showWarnings>true</showWarnings>
             <compilerArgs>
@@ -888,11 +889,6 @@
               <phase>none</phase>
             </execution>
           </executions>
-        </plugin>
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-compiler-plugin</artifactId>
-          <version>3.8.1</version>
         </plugin>
         <plugin>
           <groupId>org.sonarsource.scanner.maven</groupId>
